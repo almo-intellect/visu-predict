@@ -248,11 +248,20 @@ class TrafficTransformer(nn.Module):
             # ``[N, head_in_steps * d_model]`` to ``[N, pred_len]``.
             self.stae_head: nn.Linear | None = nn.Linear(head_in_steps * hidden_dim, pred_len)
             self.stae_seq_length = seq_length
+            # Learnable token that replaces masked-cell embeddings during
+            # masked-reconstruction pretraining. Adds ``d_model`` channels
+            # to every cell where ``mask == True``.
+            self.mask_token: nn.Parameter | None = nn.Parameter(torch.zeros(hidden_dim))
+            # Reconstruction head: per-cell projection from d_model back to a
+            # single value, used by ``forward_reconstruct`` during pretraining.
+            self.reconstruction_head: nn.Linear | None = nn.Linear(hidden_dim, 1)
         else:
             self.stae_composer = None
             self.stae_attn_stack = None
             self.stae_head = None
             self.stae_patch = None
+            self.mask_token = None
+            self.reconstruction_head = None
             self.use_temporal_patching = False
             self.feature_attention = FeatureAttention(
                 feature_dims=self.feature_dims,
@@ -429,6 +438,64 @@ class TrafficTransformer(nn.Module):
             spatial_bias = self.adaptive_adj.as_attention_bias(num_heads=self.num_heads)
 
         return self.stae_attn_stack(composed, spatial_attn_bias=spatial_bias)
+
+    def forward_reconstruct(
+        self,
+        features: dict[str, torch.Tensor],
+        mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """Masked-reconstruction forward pass (STAE pipeline only).
+
+        Args:
+            features: same dict as the supervised STAE forward — must contain
+                ``traffic`` (with masked positions zeroed out by the caller),
+                ``time_of_day_idx``, ``day_of_week_idx``.
+            mask: ``[B, T, N]`` boolean tensor; ``True`` cells are replaced
+                with ``self.mask_token`` at the embedding stage.
+
+        Returns:
+            ``[B, T, N]`` reconstructed traffic values.
+        """
+        if self.model_pipeline != "stae":
+            raise RuntimeError("forward_reconstruct requires model_pipeline='stae'")
+        assert self.stae_composer is not None
+        assert self.stae_attn_stack is not None
+        assert self.mask_token is not None
+        assert self.reconstruction_head is not None
+
+        composed = self.stae_composer(
+            traffic=features["traffic"],
+            tod_idx=features["time_of_day_idx"].long(),
+            dow_idx=features["day_of_week_idx"].long(),
+        )  # [B, T, N, d_model]
+
+        # Replace masked-cell embeddings with the learnable mask token.
+        mask_expanded = mask.unsqueeze(-1)  # [B, T, N, 1]
+        composed = torch.where(mask_expanded, self.mask_token.view(1, 1, 1, -1), composed)
+
+        if self.stae_patch is not None:
+            composed = self.stae_patch(composed)
+
+        spatial_bias = None
+        if (
+            self.adaptive_adj is not None
+            and self.adaptive_adj_inject_into in ("spatial_attn", "both")
+        ):
+            spatial_bias = self.adaptive_adj.as_attention_bias(num_heads=self.num_heads)
+
+        encoded = self.stae_attn_stack(composed, spatial_attn_bias=spatial_bias)
+        # [B, T (or num_patches), N, d_model] -> per-cell scalar
+        per_cell = self.reconstruction_head(encoded).squeeze(-1)  # [B, T, N]
+
+        # If patching shortens the time dim, lift the per-patch reconstruction
+        # back to the full T by repeat_interleave so the caller can compute
+        # cell-level losses against the original target.
+        if per_cell.size(1) != mask.size(1):
+            repeat = mask.size(1) // per_cell.size(1)
+            per_cell = per_cell.repeat_interleave(repeat, dim=1)
+            # Trim/pad in case of stride or off-by-one.
+            per_cell = per_cell[:, : mask.size(1)]
+        return per_cell
 
     def _generate(self, memory: torch.Tensor, steps: int) -> torch.Tensor:
         bsz = memory.size(0)

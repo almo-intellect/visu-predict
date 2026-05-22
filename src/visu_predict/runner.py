@@ -197,3 +197,75 @@ def run_training(config: TrainingConfig, data_path: str | Path) -> dict[str, obj
         "actuals": actuals,
         "scaler": scaler,
     }
+
+
+def run_pretraining(config: TrainingConfig, data_path: str | Path) -> dict[str, object]:
+    """Masked-reconstruction pretraining (STAE pipeline only).
+
+    Builds the same STAE model that ``run_training`` would build, but trains
+    it to reconstruct masked traffic cells instead of forecasting. The
+    encoder weights are saved to ``<output>/pretrained/encoder.pth`` and
+    can be loaded later via the ``pretrained_encoder_path`` config field.
+    """
+    from visu_predict.training.pretrain import MaskedSTDataset, pretrain, save_pretrained_encoder
+
+    if config.model_pipeline != "stae":
+        raise ValueError(
+            "Pretraining requires model_pipeline='stae'; got "
+            f"{config.model_pipeline!r}"
+        )
+
+    config = setup_directories(config)
+    setup_logging(log_file=Path(config.output_dir) / "pretrain.log")
+    set_seed(config.seed)
+
+    device = best_available_device()
+    logger.info("Pretraining on device: %s", device)
+    log_gpu_memory()
+
+    df = load_traffic_dataframe(data_path)
+    logger.info("Loaded data with shape %s from %s", df.shape, data_path)
+
+    data, timestamps, _scaler, num_features = prepare_data(df, config)
+    val_size = max(1, int(len(data) * 0.2))
+    train_data, val_data = data[:-val_size], data[-val_size:]
+    train_ts, val_ts = timestamps[:-val_size], timestamps[-val_size:]
+
+    train_ds = MaskedSTDataset(train_data, train_ts, config)
+    val_ds = MaskedSTDataset(val_data, val_ts, config)
+    train_loader = DataLoader(
+        train_ds, batch_size=config.batch_size, shuffle=True,
+        num_workers=config.num_workers, pin_memory=config.pin_memory,
+    )
+    val_loader = DataLoader(
+        val_ds, batch_size=config.batch_size, shuffle=False,
+        num_workers=config.num_workers, pin_memory=config.pin_memory,
+    )
+
+    sample_features, _ = train_ds[0]
+    sample_features = {k: v.unsqueeze(0) for k, v in sample_features.items()}
+    feature_dims = {k: v for k, v in train_ds.feature_dims.items()}
+    model = _build_model(sample_features, feature_dims, num_features, config)
+
+    optimizer = _build_optimizer(model, config)
+    scheduler = _build_scheduler(optimizer, config)
+
+    model, train_losses, val_losses = pretrain(
+        model=model,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        config=config,
+        device=device,
+    )
+
+    ckpt_path = Path(config.output_dir) / "pretrained" / "encoder.pth"
+    save_pretrained_encoder(model, ckpt_path)
+
+    return {
+        "model": model,
+        "train_losses": train_losses,
+        "val_losses": val_losses,
+        "checkpoint": str(ckpt_path),
+    }
