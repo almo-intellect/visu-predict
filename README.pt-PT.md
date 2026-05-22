@@ -3,6 +3,7 @@
 [English](README.md) · **Português (Portugal)**
 
 [![CI](https://github.com/almo-intellect/visu-predict/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/almo-intellect/visu-predict/actions/workflows/ci.yml)
+[![Licença: MIT](https://img.shields.io/badge/Licen%C3%A7a-MIT-yellow.svg)](LICENSE)
 
 Conjunto de ferramentas para previsão de tráfego baseado em *Transformers*.
 Faz previsões de curto horizonte de velocidade ou fluxo de tráfego em redes

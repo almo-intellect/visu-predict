@@ -3,6 +3,7 @@
 **English** · [Português (Portugal)](README.pt-PT.md)
 
 [![CI](https://github.com/almo-intellect/visu-predict/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/almo-intellect/visu-predict/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Transformer-based traffic forecasting toolkit. Predicts short-horizon traffic
 speed/flow for sensor networks (METR-LA, PEMS-BAY, PEMS-03/04/07/08, custom
