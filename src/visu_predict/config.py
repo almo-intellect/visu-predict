@@ -149,6 +149,7 @@ class TrainingConfig:
     num_st_layers: int | None = None
     use_adaptive_adjacency: bool = False
     adaptive_adj_dim: int = 10
+    adaptive_adj_inject_into: str = "spatial_attn"
     use_temporal_patching: bool = False
     patch_length: int = 4
     patch_stride: int | None = None
@@ -210,6 +211,11 @@ class TrainingConfig:
             )
         if self.spatial_bias_type not in ("additive", "multiplicative"):
             raise ValueError(f"spatial_bias_type must be 'additive' or 'multiplicative', got {self.spatial_bias_type!r}")
+        if self.adaptive_adj_inject_into not in ("spatial_attn", "gnn", "both"):
+            raise ValueError(
+                "adaptive_adj_inject_into must be 'spatial_attn', 'gnn', or 'both', "
+                f"got {self.adaptive_adj_inject_into!r}"
+            )
         if self.model_pipeline not in VALID_MODEL_PIPELINES:
             raise ValueError(
                 f"model_pipeline must be one of {VALID_MODEL_PIPELINES}, got {self.model_pipeline!r}"

@@ -72,11 +72,23 @@ def test_stae_pipeline_adaptive_adjacency_gets_gradient():
     assert (model.adaptive_adj.E1.grad != 0).any()
 
 
-def test_adaptive_adjacency_disabled_when_legacy_pipeline():
+def test_adaptive_adjacency_lives_in_both_pipelines():
+    # As of PR #5, AdaptiveAdjacency is no longer STAE-exclusive — it can
+    # feed the GNN encoder in the legacy pipeline too. Whether it's actually
+    # *consumed* depends on adaptive_adj_inject_into and the pipeline.
     model = TrafficTransformer(
         input_dim=5, num_features=5, hidden_dim=32, num_heads=4, num_layers=2,
         pred_len=3, model_pipeline="legacy",
-        use_adaptive_adjacency=True,  # ignored in legacy mode
+        use_adaptive_adjacency=True, adaptive_adj_inject_into="gnn",
+    )
+    assert model.adaptive_adj is not None
+    assert model.adaptive_adj_inject_into == "gnn"
+
+
+def test_adaptive_adjacency_off_by_default():
+    model = TrafficTransformer(
+        input_dim=5, num_features=5, hidden_dim=32, num_heads=4, num_layers=2,
+        pred_len=3, model_pipeline="legacy",
     )
     assert model.adaptive_adj is None
     assert model.use_adaptive_adjacency is False
