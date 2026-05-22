@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -45,9 +44,9 @@ def _map_categorical(series: pd.Series, mapping: dict[str, int]) -> pd.Series:
 class WeatherIntegration:
     """Load weather CSV and align observations with traffic timestamps."""
 
-    def __init__(self, weather_file_path: Optional[str | Path] = None) -> None:
-        self.weather_df: Optional[pd.DataFrame] = None
-        self.feature_arrays: Optional[dict[str, np.ndarray]] = None
+    def __init__(self, weather_file_path: str | Path | None = None) -> None:
+        self.weather_df: pd.DataFrame | None = None
+        self.feature_arrays: dict[str, np.ndarray] | None = None
         if weather_file_path is not None:
             self.load(weather_file_path)
 

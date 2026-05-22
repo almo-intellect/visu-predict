@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import warnings
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -112,9 +112,9 @@ class TrafficDataset(Dataset):
     def __init__(
         self,
         data: np.ndarray,
-        timestamps: Optional[pd.DatetimeIndex] = None,
-        config: Optional[TrainingConfig] = None,
-        weather: Optional[WeatherIntegration] = None,
+        timestamps: pd.DatetimeIndex | None = None,
+        config: TrainingConfig | None = None,
+        weather: WeatherIntegration | None = None,
     ) -> None:
         if config is None:
             config = TrainingConfig(base_output_dir="./output")

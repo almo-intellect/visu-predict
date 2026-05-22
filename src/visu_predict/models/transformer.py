@@ -5,7 +5,6 @@ from __future__ import annotations
 import copy
 import math
 import random
-from typing import Optional, Union
 
 import torch
 import torch.nn as nn
@@ -14,7 +13,7 @@ from visu_predict.models.attention import FeatureAttention
 from visu_predict.models.gnn import TORCH_GEOMETRIC_AVAILABLE, GCNEncoder
 from visu_predict.models.positional import PositionalEncoding
 
-FeatureInput = Union[torch.Tensor, dict[str, torch.Tensor]]
+FeatureInput = torch.Tensor | dict[str, torch.Tensor]
 
 
 class _AttnEncoderLayer(nn.TransformerEncoderLayer):
@@ -22,12 +21,12 @@ class _AttnEncoderLayer(nn.TransformerEncoderLayer):
 
     def __init__(self, *args, use_spatial_bias: bool = False, spatial_bias_type: str = "additive", **kwargs):
         super().__init__(*args, **kwargs)
-        self.attn_weights: Optional[torch.Tensor] = None
+        self.attn_weights: torch.Tensor | None = None
         self.use_spatial_bias = use_spatial_bias
         self.spatial_bias_type = spatial_bias_type
-        self._spatial_bias: Optional[torch.Tensor] = None
+        self._spatial_bias: torch.Tensor | None = None
 
-    def set_spatial_bias(self, bias: Optional[torch.Tensor]) -> None:
+    def set_spatial_bias(self, bias: torch.Tensor | None) -> None:
         self._spatial_bias = bias
 
     def _sa_block(self, x, attn_mask, key_padding_mask, is_causal=False):  # type: ignore[override]
@@ -81,8 +80,8 @@ class _DecoderLayer(nn.Module):
         self,
         tgt: torch.Tensor,
         memory: torch.Tensor,
-        tgt_mask: Optional[torch.Tensor] = None,
-        memory_mask: Optional[torch.Tensor] = None,
+        tgt_mask: torch.Tensor | None = None,
+        memory_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         tgt2, _ = self.self_attn(tgt, tgt, tgt, attn_mask=tgt_mask, need_weights=False)
         tgt = self.norm1(tgt + self.dropout1(tgt2))
@@ -93,7 +92,7 @@ class _DecoderLayer(nn.Module):
 
 
 class _Decoder(nn.Module):
-    def __init__(self, layer: _DecoderLayer, num_layers: int, norm: Optional[nn.Module] = None) -> None:
+    def __init__(self, layer: _DecoderLayer, num_layers: int, norm: nn.Module | None = None) -> None:
         super().__init__()
         self.layers = nn.ModuleList(copy.deepcopy(layer) for _ in range(num_layers))
         self.norm = norm
@@ -102,8 +101,8 @@ class _Decoder(nn.Module):
         self,
         tgt: torch.Tensor,
         memory: torch.Tensor,
-        tgt_mask: Optional[torch.Tensor] = None,
-        memory_mask: Optional[torch.Tensor] = None,
+        tgt_mask: torch.Tensor | None = None,
+        memory_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         out = tgt
         for layer in self.layers:
@@ -140,7 +139,7 @@ class TrafficTransformer(nn.Module):
         activation: str = "gelu",
         decoder_type: str = "linear",
         pred_len: int = 12,
-        feature_dims: Optional[dict[str, int]] = None,
+        feature_dims: dict[str, int] | None = None,
         use_gnn_pre_transformer: bool = False,
         spatial_feature_dim: int = 0,
         gnn_type: str = "gcn",
@@ -237,7 +236,7 @@ class TrafficTransformer(nn.Module):
         else:
             self.decoder = nn.Linear(hidden_dim, num_features * pred_len)
 
-        self.attention_weights: Optional[torch.Tensor] = None
+        self.attention_weights: torch.Tensor | None = None
         self.feature_importances: dict[str, float] = {}
 
     def _compute_spatial_bias(self, spatial_features: torch.Tensor) -> torch.Tensor:
@@ -257,7 +256,7 @@ class TrafficTransformer(nn.Module):
     def encode(
         self,
         src: FeatureInput,
-        adjacency_matrix: Optional[torch.Tensor] = None,
+        adjacency_matrix: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if isinstance(src, torch.Tensor):
             memory = self.embedding(src)
@@ -269,7 +268,7 @@ class TrafficTransformer(nn.Module):
 
             if self.use_gnn_pre_transformer and adjacency_matrix is not None and "traffic" in src_dict:
                 traffic = src_dict["traffic"]
-                bsz, seq_len, _ = traffic.shape
+                _, seq_len, _ = traffic.shape
                 enhanced = []
                 for t in range(seq_len):
                     nodes = traffic[:, t, :].transpose(0, 1)  # [N, B]
@@ -311,8 +310,8 @@ class TrafficTransformer(nn.Module):
     def forward(
         self,
         src: FeatureInput,
-        target: Optional[torch.Tensor] = None,
-        adjacency_matrix: Optional[torch.Tensor] = None,
+        target: torch.Tensor | None = None,
+        adjacency_matrix: torch.Tensor | None = None,
     ) -> torch.Tensor:
         memory = self.encode(src, adjacency_matrix)
 

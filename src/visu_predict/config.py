@@ -5,10 +5,10 @@ from __future__ import annotations
 import logging
 import multiprocessing
 import warnings
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
@@ -47,7 +47,7 @@ class TrainingConfig:
     base_output_dir: str
 
     dataset_name: str = "METR-LA"
-    data_file: Optional[str] = None
+    data_file: str | None = None
 
     batch_size: int = 16
     seq_length: int = 12
@@ -72,10 +72,10 @@ class TrainingConfig:
     holiday_country_code: str = "US"
     use_weather_feature: bool = False
     weather_feature_type: str = "all_features"
-    weather_data_file: Optional[str] = None
+    weather_data_file: str | None = None
 
-    gradient_clip: Optional[float] = 1.0
-    scheduler_type: Optional[str] = "plateau"
+    gradient_clip: float | None = 1.0
+    scheduler_type: str | None = "plateau"
     scheduler_patience: int = 10
     scheduler_factor: float = 0.5
     step_scheduler_step_size: int = 10
@@ -98,7 +98,7 @@ class TrainingConfig:
     gnn_residual: bool = False
     gnn_layers: int = 3
 
-    coordinates_file: Optional[str] = None
+    coordinates_file: str | None = None
     num_sensors: int = 207
     embedding_dim: int = 207
     use_spatial_bias: bool = False
@@ -121,9 +121,9 @@ class TrainingConfig:
     pin_memory: bool = True
 
     enable_transfer_learning: bool = False
-    source_model_path: Optional[str] = None
-    target_dataset_name: Optional[str] = None
-    target_data_path: Optional[str] = None
+    source_model_path: str | None = None
+    target_dataset_name: str | None = None
+    target_data_path: str | None = None
     freeze_encoder: bool = True
     freeze_layers: int = 1
     adapter_dim: int = 64
@@ -131,10 +131,10 @@ class TrainingConfig:
 
     seed: int = 42
 
-    input_dir: Optional[str] = None
-    output_dir: Optional[str] = None
-    model_dir: Optional[str] = None
-    results_dir: Optional[str] = None
+    input_dir: str | None = None
+    output_dir: str | None = None
+    model_dir: str | None = None
+    results_dir: str | None = None
 
     def __post_init__(self) -> None:
         self._adjust_hidden_dim()
@@ -203,7 +203,7 @@ def load_config(config_path: str | Path) -> TrainingConfig:
     return TrainingConfig(**data)
 
 
-def setup_directories(config: TrainingConfig, run_name: Optional[str] = None) -> TrainingConfig:
+def setup_directories(config: TrainingConfig, run_name: str | None = None) -> TrainingConfig:
     """Create timestamped output, model, and results directories.
 
     Updates the config in place with the resolved paths and returns it.

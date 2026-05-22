@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Optional, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -41,9 +41,9 @@ def plot_predictions_vs_actual(
     predictions: np.ndarray,
     actuals: np.ndarray,
     output_path: str | Path,
-    sensor_ids: Optional[Sequence[int]] = None,
+    sensor_ids: Sequence[int] | None = None,
     max_sensors: int = 6,
-    horizon: Optional[int] = None,
+    horizon: int | None = None,
 ) -> Path:
     """Plot prediction vs actual time series for a handful of sensors."""
     output_path = Path(output_path)
@@ -62,7 +62,7 @@ def plot_predictions_vs_actual(
     if len(list(chosen)) == 1:
         axes = [axes]
 
-    for ax, sid in zip(axes, chosen):
+    for ax, sid in zip(axes, chosen, strict=False):
         ax.plot(actuals[:, sid], label="actual", linewidth=1.2)
         ax.plot(predictions[:, sid], label="prediction", linewidth=1.2, alpha=0.85)
         ax.set_title(f"Sensor {sid}")

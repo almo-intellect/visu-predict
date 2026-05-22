@@ -7,8 +7,6 @@ context-adaptive weighting and a cross-attention fusion.
 
 from __future__ import annotations
 
-from typing import Optional
-
 import torch
 import torch.nn as nn
 
@@ -82,7 +80,7 @@ class FeatureAttention(nn.Module):
             nn.Dropout(dropout),
         )
 
-        self.attention_weights: Optional[torch.Tensor] = None
+        self.attention_weights: torch.Tensor | None = None
         self.feature_importances: dict[str, float] = {}
 
     def forward(self, features: dict[str, torch.Tensor]) -> torch.Tensor:

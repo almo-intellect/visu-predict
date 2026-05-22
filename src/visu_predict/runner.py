@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 import torch
 from torch.utils.data import DataLoader
@@ -39,7 +38,7 @@ def _build_optimizer(model: torch.nn.Module, config: TrainingConfig) -> torch.op
 
 def _build_scheduler(
     optimizer: torch.optim.Optimizer, config: TrainingConfig,
-) -> Optional[torch.optim.lr_scheduler.LRScheduler]:
+) -> torch.optim.lr_scheduler.LRScheduler | None:
     kind = config.scheduler_type
     if kind in (None, "none", ""):
         return None

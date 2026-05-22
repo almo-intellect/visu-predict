@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -27,14 +26,14 @@ COORDINATES_FILENAMES: dict[str, str] = {
 }
 
 
-def _first_existing(candidates: list[Path]) -> Optional[Path]:
+def _first_existing(candidates: list[Path]) -> Path | None:
     for c in candidates:
         if c.exists():
             return c
     return None
 
 
-def find_adjacency_matrix(dataset_name: str, input_dir: str | Path) -> Optional[Path]:
+def find_adjacency_matrix(dataset_name: str, input_dir: str | Path) -> Path | None:
     """Locate adjacency matrix pickle for a dataset within input_dir."""
     filename = ADJACENCY_FILENAMES.get(dataset_name, f"adj_{dataset_name}.pkl")
     input_dir = Path(input_dir)
@@ -49,7 +48,7 @@ def find_adjacency_matrix(dataset_name: str, input_dir: str | Path) -> Optional[
     return result
 
 
-def find_coordinates(dataset_name: str, input_dir: str | Path) -> Optional[Path]:
+def find_coordinates(dataset_name: str, input_dir: str | Path) -> Path | None:
     """Locate sensor coordinates CSV for a dataset within input_dir."""
     input_dir = Path(input_dir)
     filename = COORDINATES_FILENAMES.get(dataset_name, f"graph_sensor_locations_{dataset_name}.csv")

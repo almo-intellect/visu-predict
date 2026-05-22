@@ -70,7 +70,7 @@ class GCNEncoder(nn.Module):
 
     def forward(self, x: torch.Tensor, adjacency: torch.Tensor) -> torch.Tensor:
         edge_index = self._to_edge_index(adjacency)
-        for i, (layer, norm) in enumerate(zip(self.layers, self.layer_norms)):
+        for i, (layer, norm) in enumerate(zip(self.layers, self.layer_norms, strict=True)):
             residual = x if self.use_residual and x.size(-1) == layer.out_channels else None
             x_new = layer(x, edge_index)
             if i < len(self.layers) - 1:

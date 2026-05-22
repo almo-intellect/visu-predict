@@ -16,7 +16,7 @@ def _make_df(rows: int = 96, sensors: int = 8) -> pd.DataFrame:
 def test_prepare_data_normalises_and_returns_shape():
     cfg = TrainingConfig(base_output_dir="./tmp", missing_value_strategy="zero")
     df = _make_df()
-    data, ts, scaler, n_features = prepare_data(df, cfg)
+    data, ts, _scaler, n_features = prepare_data(df, cfg)
     assert data.shape == df.shape
     assert n_features == df.shape[1]
     assert len(ts) == len(df)

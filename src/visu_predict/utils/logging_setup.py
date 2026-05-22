@@ -5,12 +5,11 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
 
 
 def setup_logging(
     level: str = "INFO",
-    log_file: Optional[str | Path] = None,
+    log_file: str | Path | None = None,
     fmt: str = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
 ) -> logging.Logger:
     """Configure the root logger to stream to stdout and (optionally) to a file."""

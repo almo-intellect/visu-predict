@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
 import numpy as np
 import torch
@@ -60,8 +61,8 @@ def _compute_loss(
 def _forward(
     model: nn.Module,
     data: Any,
-    target: Optional[torch.Tensor],
-    adjacency_matrix: Optional[torch.Tensor],
+    target: torch.Tensor | None,
+    adjacency_matrix: torch.Tensor | None,
     config: TrainingConfig,
     *,
     teacher_forcing: bool,
@@ -86,9 +87,9 @@ def train(
     criterion: Callable,
     config: TrainingConfig,
     data_scaler: Any,
-    scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
+    scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
     device: str | torch.device = "cpu",
-    adjacency_matrix: Optional[torch.Tensor] = None,
+    adjacency_matrix: torch.Tensor | None = None,
 ) -> tuple[nn.Module, list[float], list[float]]:
     """Train the model with early stopping. Returns (model, train_losses, val_losses)."""
     device = torch.device(device)
@@ -200,7 +201,7 @@ def evaluate(
     data_scaler: Any,
     config: TrainingConfig,
     device: str | torch.device = "cpu",
-    adjacency_matrix: Optional[torch.Tensor] = None,
+    adjacency_matrix: torch.Tensor | None = None,
 ) -> tuple[float, Metrics]:
     """Compute validation loss and (MAE, RMSE, R², MAPE) in original scale."""
     device = torch.device(device)
@@ -251,7 +252,7 @@ def predict(
     data_scaler: Any,
     config: TrainingConfig,
     device: str | torch.device = "cpu",
-    adjacency_matrix: Optional[torch.Tensor] = None,
+    adjacency_matrix: torch.Tensor | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Generate predictions; returns (predictions, actuals) in original scale."""
     device = torch.device(device)

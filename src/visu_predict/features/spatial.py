@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import pickle
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -99,8 +98,8 @@ class SpatialIntegration:
 
     def __init__(
         self,
-        adjacency_path: Optional[str | Path] = None,
-        coordinates_path: Optional[str | Path] = None,
+        adjacency_path: str | Path | None = None,
+        coordinates_path: str | Path | None = None,
         num_sensors: int = 207,
         spatial_dim: int = 207,
         embedding_dim: int = 207,
@@ -128,9 +127,9 @@ class SpatialIntegration:
             self.normalized_adjacency, dtype=torch.float32, device=self.device,
         )
         self.node_embeddings = self._build_node_embeddings()
-        self._projection: Optional[nn.Linear] = None
+        self._projection: nn.Linear | None = None
 
-    def _load_coordinates(self, coordinates_path: Optional[str | Path]) -> Optional[np.ndarray]:
+    def _load_coordinates(self, coordinates_path: str | Path | None) -> np.ndarray | None:
         if not coordinates_path:
             return None
         path = Path(coordinates_path)
