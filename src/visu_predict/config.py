@@ -153,6 +153,9 @@ class TrainingConfig:
     use_temporal_patching: bool = False
     patch_length: int = 4
     patch_stride: int | None = None
+    mask_ratio: float = 0.25
+    pretrain_num_epochs: int = 50
+    pretrained_encoder_path: str | None = None
 
     input_dir: str | None = None
     output_dir: str | None = None
