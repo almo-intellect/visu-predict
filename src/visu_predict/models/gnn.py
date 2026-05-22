@@ -69,6 +69,14 @@ class GCNEncoder(nn.Module):
         return torch.stack(torch.nonzero(adj, as_tuple=True))
 
     def forward(self, x: torch.Tensor, adjacency: torch.Tensor) -> torch.Tensor:
+        """Args:
+            x: node features ``[num_nodes, in_channels]``.
+            adjacency: ``[N, N]`` adjacency matrix. May be a static matrix
+                loaded from a ``.pkl`` file or a runtime-recomputed
+                :class:`AdaptiveAdjacency` output. Non-zero entries are
+                interpreted as edges (cast to a sparse ``edge_index`` for
+                ``torch_geometric``).
+        """
         edge_index = self._to_edge_index(adjacency)
         for i, (layer, norm) in enumerate(zip(self.layers, self.layer_norms, strict=True)):
             residual = x if self.use_residual and x.size(-1) == layer.out_channels else None
