@@ -1,0 +1,70 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+pip-wheel-metadata/
+share/python-wheels/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+
+# Editors / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Claude Code per-user settings (the shared .claude/settings.json may be committed)
+.claude/settings.local.json
+
+# Testing / type checking
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# ML artefacts and outputs
+*.pkl
+*.pt
+*.pth
+*.ckpt
+*.h5
+*.npy
+*.npz
+outputs/
+runs/
+logs/
+wandb/
+
+# Data (don't commit large datasets)
+data/
+*.csv
+!configs/*.csv
+!tests/fixtures/*.csv
+
+# Internal scratch
+_extracted/
+*.bak
+
+# Source Colab notebooks contain hardcoded internal Drive paths — not for the public repo.
+# Move a cleaned reference notebook to notebooks/ if you want one published.
+VISU_Traffic_Transformer*.ipynb

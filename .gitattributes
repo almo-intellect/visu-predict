@@ -1,0 +1,26 @@
+# Force LF line endings for all text files so checkouts are consistent across
+# Linux, macOS, and Windows (avoids spurious CRLF/LF diffs).
+* text=auto eol=lf
+
+# Explicit text rules for source/config files.
+*.py     text eol=lf
+*.pyi    text eol=lf
+*.md     text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf
+*.toml   text eol=lf
+*.cfg    text eol=lf
+*.ini    text eol=lf
+*.txt    text eol=lf
+*.json   text eol=lf
+
+# Binary files.
+*.pkl    binary
+*.pth    binary
+*.pt     binary
+*.ckpt   binary
+*.npy    binary
+*.npz    binary
+*.h5     binary
+*.png    binary
+*.jpg    binary

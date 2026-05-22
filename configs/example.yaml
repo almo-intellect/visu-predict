@@ -1,0 +1,87 @@
+# Example training configuration for visu-predict.
+# Copy this file, edit base_output_dir + dataset_name, then run:
+#   visu-predict train --config configs/example.yaml --data path/to/traffic.csv
+
+# Where checkpoints and plots will be written. A timestamped subdirectory is created.
+base_output_dir: ./outputs
+
+# Used to locate adj_<dataset>.pkl and graph_sensor_locations_<dataset>.csv in
+# <base_output_dir>/inputs/. Supported defaults: METR-LA, PEMS-BAY, PEMS-03,
+# PEMS-04, PEMS-07, PEMS-08. Any other value just bypasses dataset-specific paths.
+dataset_name: METR-LA
+
+# --- Sequence settings ---
+seq_length: 12          # number of input steps
+pred_length: 12         # number of forecast steps
+
+# --- Model architecture ---
+hidden_dim: 336         # auto-adjusted to be divisible by num_heads and even
+num_layers: 3
+num_heads: 16
+dropout: 0.05
+ff_dim_multiplier: 4
+activation: gelu
+decoder_type: linear    # linear | mlp | transformer
+num_decoder_layers: 3
+teacher_forcing_ratio: 0.2
+
+# --- Optimisation ---
+batch_size: 16
+num_epochs: 100
+patience: 30
+learning_rate: 0.0001
+optimizer_type: adamw   # adam | adamw | sgd
+loss_function: mae      # mae | mse | huber | hybrid
+gradient_clip: 1.0
+accumulation_steps: 8
+use_mixed_precision: true
+
+# --- LR scheduler ---
+scheduler_type: plateau  # plateau | step | cosine_warmup | null
+scheduler_patience: 10
+scheduler_factor: 0.5
+warmup_epochs: 30
+
+# --- Features ---
+use_time_features: true
+use_holiday_feature: false
+holiday_country_code: US
+
+use_weather_feature: false
+weather_feature_type: all_features
+# weather_data_file: ./inputs/clean_weather_data.csv
+
+use_lagged_features: false
+num_lags: 1
+
+# --- Spatial / GNN (requires torch-geometric for use_gnn_pre_transformer) ---
+use_spatial_features: false
+use_gnn_pre_transformer: false
+gnn_type: gcn           # gcn | gat
+gnn_layers: 3
+gnn_residual: false
+gat_heads: 16
+gat_concat: true
+
+spatial_feature_dim: 336
+embedding_dim: 207
+use_spatial_bias: false
+spatial_bias_type: additive
+
+# --- Data preprocessing ---
+data_scaler_type: minmax        # minmax | standard | robust
+missing_value_strategy: mean    # ffill_bfill | zero | mean | median | interpolate
+
+# --- Reproducibility / misc ---
+seed: 42
+num_workers: 2
+pin_memory: true
+save_predictions: true
+generate_plots: true
+
+# --- Transfer learning ---
+enable_transfer_learning: false
+# source_model_path: ./outputs/<source_run>/models/best_model_<ts>.pth
+freeze_encoder: true
+freeze_layers: 1
+transfer_learning_rate: 5e-5
