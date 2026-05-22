@@ -100,6 +100,8 @@ def _build_model(
         seq_length=config.seq_length,
         interleave_order=config.interleave_order,
         num_st_layers=config.num_st_layers,
+        use_adaptive_adjacency=config.use_adaptive_adjacency,
+        adaptive_adj_dim=config.adaptive_adj_dim,
     )
 
 

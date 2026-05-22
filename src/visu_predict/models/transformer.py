@@ -9,6 +9,7 @@ import random
 import torch
 import torch.nn as nn
 
+from visu_predict.models.adaptive_graph import AdaptiveAdjacency
 from visu_predict.models.attention import FeatureAttention
 from visu_predict.models.embeddings import STAEInputComposer
 from visu_predict.models.gnn import TORCH_GEOMETRIC_AVAILABLE, GCNEncoder
@@ -166,6 +167,8 @@ class TrafficTransformer(nn.Module):
         seq_length: int = 12,
         interleave_order: str = "TS",
         num_st_layers: int | None = None,
+        use_adaptive_adjacency: bool = False,
+        adaptive_adj_dim: int = 10,
     ) -> None:
         super().__init__()
         if hidden_dim % num_heads != 0:
@@ -223,10 +226,18 @@ class TrafficTransformer(nn.Module):
             # ``[N, seq_length * d_model]`` to ``[N, pred_len]``.
             self.stae_head: nn.Linear | None = nn.Linear(seq_length * hidden_dim, pred_len)
             self.stae_seq_length = seq_length
+            self.adaptive_adj: AdaptiveAdjacency | None = (
+                AdaptiveAdjacency(num_sensors=num_features, d_emb=adaptive_adj_dim)
+                if use_adaptive_adjacency
+                else None
+            )
+            self.use_adaptive_adjacency = use_adaptive_adjacency
         else:
             self.stae_composer = None
             self.stae_attn_stack = None
             self.stae_head = None
+            self.adaptive_adj = None
+            self.use_adaptive_adjacency = False
             self.feature_attention = FeatureAttention(
                 feature_dims=self.feature_dims,
                 hidden_dim=hidden_dim,
@@ -372,7 +383,11 @@ class TrafficTransformer(nn.Module):
             dow_idx=src["day_of_week_idx"].long(),
         )  # [B, T, N, d_model]
 
-        return self.stae_attn_stack(composed)
+        spatial_bias = None
+        if self.adaptive_adj is not None:
+            spatial_bias = self.adaptive_adj.as_attention_bias(num_heads=self.num_heads)
+
+        return self.stae_attn_stack(composed, spatial_attn_bias=spatial_bias)
 
     def _generate(self, memory: torch.Tensor, steps: int) -> torch.Tensor:
         bsz = memory.size(0)

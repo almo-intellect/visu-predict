@@ -147,6 +147,8 @@ class TrainingConfig:
     d_node: int = 0
     interleave_order: str = "TS"
     num_st_layers: int | None = None
+    use_adaptive_adjacency: bool = False
+    adaptive_adj_dim: int = 10
 
     input_dir: str | None = None
     output_dir: str | None = None
