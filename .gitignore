@@ -65,6 +65,5 @@ data/
 _extracted/
 *.bak
 
-# Source Colab notebooks contain hardcoded internal Drive paths — not for the public repo.
-# Move a cleaned reference notebook to notebooks/ if you want one published.
-VISU_Traffic_Transformer*.ipynb
+# Local-only working notebooks (not for the public repo).
+*.ipynb

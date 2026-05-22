@@ -1,4 +1,4 @@
-"""Logging setup: console + file handler, replaces the notebook's TeeLogger."""
+"""Logging setup: console + file handler."""
 
 from __future__ import annotations
 

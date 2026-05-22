@@ -11,10 +11,6 @@ características sobre dados temporais, meteorológicos, espaciais e desfasados,
 e um caminho de aprendizagem por transferência para conjuntos de dados de
 baixa cobertura.
 
-> Originalmente desenvolvido como um *notebook* Google Colab
-> (`VISU_Traffic_Transformer_*.ipynb`). Este repositório é uma reescrita
-> desse *notebook* num pacote Python mais sustentável.
-
 ## Funcionalidades
 
 - **Transformer encoder–decoder** com descodificador linear, MLP ou
@@ -109,25 +105,6 @@ src/visu_predict/
 ├── runner.py              # Pipeline ponta a ponta
 └── cli.py                 # `visu-predict train ...`
 ```
-
-## Diferenças face ao *notebook* original
-
-A reescrita preserva a arquitetura do modelo e o comportamento de treino,
-mas faz a seguinte limpeza:
-
-- Removeu todo o código específico do Colab (`drive.mount`, caminhos de
-  Google Drive codificados, `!pip install` em linha).
-- Substituiu o desvio de `stdout` via `TeeLogger` pelo módulo padrão
-  `logging`.
-- Consolidou duas implementações paralelas de carregamento meteorológico
-  numa só (`features/weather.py`).
-- Substituiu o `SpatialIntegration` baseado em *singleton* por uma classe
-  normal.
-- Removeu a referência LSTM embebida e o gerador de relatórios PDF do
-  *notebook* (podem ser reintroduzidos como pacote separado, se
-  necessário).
-- Acrescentou anotações de tipo, validação em
-  `TrainingConfig.__post_init__`, uma CLI e um *workflow* de CI.
 
 ## Dados
 

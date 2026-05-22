@@ -8,10 +8,6 @@ datasets) using an encoder–decoder Transformer with optional graph neural
 network pre-processing, feature-wise attention over time / weather / spatial /
 lagged features, and a transfer-learning path for low-resource targets.
 
-> Originally developed as a Google Colab research notebook
-> (`VISU_Traffic_Transformer_*.ipynb`). This repository is a refactor of that
-> notebook into a maintainable Python package.
-
 ## Features
 
 - **Encoder–decoder Transformer** with linear, MLP, or autoregressive
@@ -102,22 +98,6 @@ src/visu_predict/
 ├── runner.py              # End-to-end pipeline
 └── cli.py                 # `visu-predict train ...`
 ```
-
-## Differences from the original notebook
-
-The refactor preserves the model architecture and training behaviour while
-cleaning up:
-
-- Removed all Colab-specific code (`drive.mount`, hardcoded Google Drive paths,
-  inline `!pip install`).
-- Replaced the `TeeLogger` stdout-hijack with the standard `logging` module.
-- Consolidated two parallel weather-loading implementations into one
-  (`features/weather.py`).
-- Replaced the singleton `SpatialIntegration` with a regular class.
-- Removed the embedded LSTM baseline and the in-notebook PDF report generator
-  (can be reintroduced as a separate package if needed).
-- Added type hints, validation in `TrainingConfig.__post_init__`, a CLI, and
-  a CI workflow.
 
 ## Development
 
