@@ -145,6 +145,8 @@ class TrainingConfig:
     d_dow: int = 24
     d_adaptive: int = 80
     d_node: int = 0
+    interleave_order: str = "TS"
+    num_st_layers: int | None = None
 
     input_dir: str | None = None
     output_dir: str | None = None
@@ -217,6 +219,10 @@ class TrainingConfig:
                 raise ValueError(
                     f"STAE pipeline requires d_input + d_tod + d_dow + d_adaptive + d_node "
                     f"({stae_dim_sum}) to equal hidden_dim ({self.hidden_dim})"
+                )
+            if self.interleave_order not in ("TS", "ST"):
+                raise ValueError(
+                    f"interleave_order must be 'TS' or 'ST', got {self.interleave_order!r}"
                 )
 
     def to_dict(self) -> dict[str, Any]:

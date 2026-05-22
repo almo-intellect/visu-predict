@@ -66,7 +66,7 @@ def test_stae_pipeline_forward():
         decoder_type="linear",
         feature_dims={"traffic": num_sensors, "concatenated": num_sensors},
         model_pipeline="stae",
-        steps_per_day=288,
+        steps_per_day=288, seq_length=seq_len,
         d_input=8, d_tod=8, d_dow=8, d_adaptive=8, d_node=0,
     )
     src = {
@@ -83,7 +83,7 @@ def test_stae_pipeline_requires_index_keys():
     import pytest
     model = TrafficTransformer(
         input_dim=5, num_features=5, hidden_dim=32, num_heads=4, num_layers=2,
-        pred_len=3, model_pipeline="stae",
+        pred_len=3, model_pipeline="stae", seq_length=6,
         d_input=8, d_tod=8, d_dow=8, d_adaptive=8, d_node=0,
     )
     src = {"traffic": torch.randn(2, 6, 5), "concatenated": torch.randn(2, 6, 5)}
@@ -104,7 +104,7 @@ def test_stae_pipeline_dim_sum_must_match_hidden_dim():
 def test_stae_adaptive_embedding_receives_gradient():
     model = TrafficTransformer(
         input_dim=4, num_features=4, hidden_dim=24, num_heads=4, num_layers=1,
-        pred_len=2, model_pipeline="stae",
+        pred_len=2, model_pipeline="stae", seq_length=3,
         d_input=6, d_tod=6, d_dow=6, d_adaptive=6, d_node=0,
     )
     src = {

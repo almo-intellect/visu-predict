@@ -13,6 +13,7 @@ from visu_predict.models.attention import FeatureAttention
 from visu_predict.models.embeddings import STAEInputComposer
 from visu_predict.models.gnn import TORCH_GEOMETRIC_AVAILABLE, GCNEncoder
 from visu_predict.models.positional import PositionalEncoding
+from visu_predict.models.st_blocks import STAttnStack
 
 FeatureInput = torch.Tensor | dict[str, torch.Tensor]
 
@@ -162,6 +163,9 @@ class TrafficTransformer(nn.Module):
         d_dow: int = 24,
         d_adaptive: int = 80,
         d_node: int = 0,
+        seq_length: int = 12,
+        interleave_order: str = "TS",
+        num_st_layers: int | None = None,
     ) -> None:
         super().__init__()
         if hidden_dim % num_heads != 0:
@@ -207,8 +211,22 @@ class TrafficTransformer(nn.Module):
                 d_node=d_node,
             )
             self.feature_attention = None
+            self.stae_attn_stack: STAttnStack | None = STAttnStack(
+                d_model=hidden_dim,
+                num_heads=num_heads,
+                num_layers=num_st_layers or num_layers,
+                dropout=dropout,
+                ff_multiplier=ff_dim_multiplier,
+                interleave_order=interleave_order,
+            )
+            # STAE output head: per-sensor projection from
+            # ``[N, seq_length * d_model]`` to ``[N, pred_len]``.
+            self.stae_head: nn.Linear | None = nn.Linear(seq_length * hidden_dim, pred_len)
+            self.stae_seq_length = seq_length
         else:
             self.stae_composer = None
+            self.stae_attn_stack = None
+            self.stae_head = None
             self.feature_attention = FeatureAttention(
                 feature_dims=self.feature_dims,
                 hidden_dim=hidden_dim,
@@ -332,11 +350,10 @@ class TrafficTransformer(nn.Module):
     def _stae_encode(self, src: FeatureInput) -> torch.Tensor:
         """STAE pipeline encoder.
 
-        Composes ``[B, T, N, d_model]`` via :class:`STAEInputComposer` and
-        feeds it into the existing temporal encoder stack. PR #1 reduces the
-        sensor axis to ``[B, T, d_model]`` by mean-pooling; PR #2 replaces
-        this with an alternating spatial↔temporal stack that keeps the
-        sensor axis end-to-end.
+        Composes ``[B, T, N, d_model]`` via :class:`STAEInputComposer`, then
+        runs an alternating spatial ↔ temporal transformer stack
+        (:class:`STAttnStack`). Returns the same shape ``[B, T, N, d_model]``;
+        the dedicated STAE head in :meth:`forward` consumes it directly.
         """
         if not isinstance(src, dict):
             raise TypeError("STAE pipeline requires a dict of features, not a raw tensor")
@@ -347,6 +364,7 @@ class TrafficTransformer(nn.Module):
                     f"got keys {sorted(src.keys())}"
                 )
         assert self.stae_composer is not None
+        assert self.stae_attn_stack is not None
 
         composed = self.stae_composer(
             traffic=src["traffic"],
@@ -354,13 +372,7 @@ class TrafficTransformer(nn.Module):
             dow_idx=src["day_of_week_idx"].long(),
         )  # [B, T, N, d_model]
 
-        # Temporary reduction to feed the existing temporal encoder; PR #2
-        # replaces this with an alternating spatial/temporal stack.
-        memory = composed.mean(dim=2)  # [B, T, d_model]
-
-        for layer in self.encoder:
-            memory = layer(memory)
-        return memory
+        return self.stae_attn_stack(composed)
 
     def _generate(self, memory: torch.Tensor, steps: int) -> torch.Tensor:
         bsz = memory.size(0)
@@ -383,6 +395,15 @@ class TrafficTransformer(nn.Module):
         adjacency_matrix: torch.Tensor | None = None,
     ) -> torch.Tensor:
         memory = self.encode(src, adjacency_matrix)
+
+        if self.model_pipeline == "stae":
+            assert self.stae_head is not None
+            # memory: [B, T, N, d_model] -> per-sensor [N, T*d_model] -> [N, pred_len]
+            bsz, seq_len, num_sensors, d_model = memory.shape
+            # rearrange to [B, N, T, d_model] -> [B, N, T*d_model]
+            flat = memory.permute(0, 2, 1, 3).reshape(bsz, num_sensors, seq_len * d_model)
+            out = self.stae_head(flat)  # [B, N, pred_len]
+            return out.permute(0, 2, 1).contiguous()  # [B, pred_len, N]
 
         if self.decoder_type == "transformer":
             if self.training and target is not None and random.random() < self.teacher_forcing_ratio:
