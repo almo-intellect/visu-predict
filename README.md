@@ -1,5 +1,7 @@
 # visu-predict
 
+**English** · [Português (Portugal)](README.pt-PT.md)
+
 Transformer-based traffic forecasting toolkit. Predicts short-horizon traffic
 speed/flow for sensor networks (METR-LA, PEMS-BAY, PEMS-03/04/07/08, custom
 datasets) using an encoder–decoder Transformer with optional graph neural
