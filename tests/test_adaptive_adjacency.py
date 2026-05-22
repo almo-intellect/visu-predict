@@ -15,13 +15,17 @@ def test_adjacency_shape_and_rows_sum_to_one():
 
 
 def test_adjacency_gradient_flows_to_embeddings():
-    adj_mod = AdaptiveAdjacency(num_sensors=6, d_emb=4)
-    adj = adj_mod.adjacency()
-    adj.sum().backward()
+    # Use a larger init so ReLU rarely zeros everything out; checks grad exists
+    # rather than asserting any element is non-zero (which is flaky with tiny inits).
+    torch.manual_seed(0)
+    adj_mod = AdaptiveAdjacency(num_sensors=6, d_emb=4, init_scale=0.5)
+    target = torch.randn(6, 6)
+    loss = ((adj_mod.adjacency() - target) ** 2).mean()
+    loss.backward()
     assert adj_mod.E1.grad is not None
     assert adj_mod.E2.grad is not None
-    assert (adj_mod.E1.grad != 0).any()
-    assert (adj_mod.E2.grad != 0).any()
+    assert adj_mod.E1.grad.abs().sum() > 0
+    assert adj_mod.E2.grad.abs().sum() > 0
 
 
 def test_as_attention_bias_shape_and_broadcasts():

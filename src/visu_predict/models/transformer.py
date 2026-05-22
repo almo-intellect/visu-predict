@@ -13,6 +13,7 @@ from visu_predict.models.adaptive_graph import AdaptiveAdjacency
 from visu_predict.models.attention import FeatureAttention
 from visu_predict.models.embeddings import STAEInputComposer
 from visu_predict.models.gnn import TORCH_GEOMETRIC_AVAILABLE, GCNEncoder
+from visu_predict.models.patching import PatchEmbed
 from visu_predict.models.positional import PositionalEncoding
 from visu_predict.models.st_blocks import STAttnStack
 
@@ -169,6 +170,9 @@ class TrafficTransformer(nn.Module):
         num_st_layers: int | None = None,
         use_adaptive_adjacency: bool = False,
         adaptive_adj_dim: int = 10,
+        use_temporal_patching: bool = False,
+        patch_length: int = 4,
+        patch_stride: int | None = None,
     ) -> None:
         super().__init__()
         if hidden_dim % num_heads != 0:
@@ -222,9 +226,26 @@ class TrafficTransformer(nn.Module):
                 ff_multiplier=ff_dim_multiplier,
                 interleave_order=interleave_order,
             )
+            self.stae_patch: PatchEmbed | None = None
+            head_in_steps = seq_length
+            if use_temporal_patching:
+                self.stae_patch = PatchEmbed(
+                    d_model=hidden_dim,
+                    patch_length=patch_length,
+                    patch_stride=patch_stride,
+                    d_out=hidden_dim,
+                )
+                head_in_steps = self.stae_patch.num_patches(seq_length)
+                if head_in_steps <= 0:
+                    raise ValueError(
+                        f"seq_length {seq_length} too short for patch_length "
+                        f"{patch_length} with stride {patch_stride}"
+                    )
+            self.use_temporal_patching = use_temporal_patching
+
             # STAE output head: per-sensor projection from
-            # ``[N, seq_length * d_model]`` to ``[N, pred_len]``.
-            self.stae_head: nn.Linear | None = nn.Linear(seq_length * hidden_dim, pred_len)
+            # ``[N, head_in_steps * d_model]`` to ``[N, pred_len]``.
+            self.stae_head: nn.Linear | None = nn.Linear(head_in_steps * hidden_dim, pred_len)
             self.stae_seq_length = seq_length
             self.adaptive_adj: AdaptiveAdjacency | None = (
                 AdaptiveAdjacency(num_sensors=num_features, d_emb=adaptive_adj_dim)
@@ -236,8 +257,10 @@ class TrafficTransformer(nn.Module):
             self.stae_composer = None
             self.stae_attn_stack = None
             self.stae_head = None
+            self.stae_patch = None
             self.adaptive_adj = None
             self.use_adaptive_adjacency = False
+            self.use_temporal_patching = False
             self.feature_attention = FeatureAttention(
                 feature_dims=self.feature_dims,
                 hidden_dim=hidden_dim,
@@ -382,6 +405,9 @@ class TrafficTransformer(nn.Module):
             tod_idx=src["time_of_day_idx"].long(),
             dow_idx=src["day_of_week_idx"].long(),
         )  # [B, T, N, d_model]
+
+        if self.stae_patch is not None:
+            composed = self.stae_patch(composed)  # [B, num_patches, N, d_model]
 
         spatial_bias = None
         if self.adaptive_adj is not None:

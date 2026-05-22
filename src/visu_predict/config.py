@@ -149,6 +149,9 @@ class TrainingConfig:
     num_st_layers: int | None = None
     use_adaptive_adjacency: bool = False
     adaptive_adj_dim: int = 10
+    use_temporal_patching: bool = False
+    patch_length: int = 4
+    patch_stride: int | None = None
 
     input_dir: str | None = None
     output_dir: str | None = None
