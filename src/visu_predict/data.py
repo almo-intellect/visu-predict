@@ -101,6 +101,31 @@ def _create_lagged_features(data: np.ndarray, num_lags: int) -> np.ndarray:
     return np.concatenate(lags, axis=1).astype(np.float32)
 
 
+def _infer_steps_per_day(timestamps: pd.DatetimeIndex, fallback: int = 288) -> int:
+    """Infer the number of timesteps per day from the index's median spacing."""
+    if len(timestamps) < 2:
+        return fallback
+    diffs = pd.to_datetime(timestamps).to_series().diff().dropna()
+    if diffs.empty:
+        return fallback
+    step_seconds = int(diffs.median().total_seconds())
+    if step_seconds <= 0:
+        return fallback
+    return max(1, 86_400 // step_seconds)
+
+
+def _create_time_indices(
+    timestamps: pd.DatetimeIndex, steps_per_day: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return (time_of_day_idx, day_of_week_idx) as int64 arrays of shape [T]."""
+    t = pd.to_datetime(timestamps)
+    step_seconds = 86_400 // steps_per_day
+    seconds = t.hour.values * 3600 + t.minute.values * 60 + t.second.values
+    tod_idx = (seconds // max(1, step_seconds)).astype(np.int64) % steps_per_day
+    dow_idx = t.dayofweek.values.astype(np.int64)
+    return tod_idx, dow_idx
+
+
 class TrafficDataset(Dataset):
     """Windowed traffic dataset with optional time/holiday/weather/lag features.
 
@@ -126,8 +151,15 @@ class TrafficDataset(Dataset):
         self.pred_length = config.pred_length
 
         self.feature_groups: dict[str, np.ndarray] = {"traffic": self.data}
+        self.index_groups: dict[str, np.ndarray] = {}
 
-        if config.use_time_features and timestamps is not None:
+        if config.use_discrete_time_embeddings and timestamps is not None:
+            steps_per_day = config.steps_per_day or _infer_steps_per_day(timestamps)
+            self.steps_per_day = steps_per_day
+            tod_idx, dow_idx = _create_time_indices(timestamps, steps_per_day)
+            self.index_groups["time_of_day_idx"] = tod_idx
+            self.index_groups["day_of_week_idx"] = dow_idx
+        elif config.use_time_features and timestamps is not None:
             self.feature_groups["time"] = _create_time_features(timestamps)
 
         if config.use_holiday_feature and timestamps is not None:
@@ -163,6 +195,8 @@ class TrafficDataset(Dataset):
         features: dict[str, torch.Tensor] = {
             name: torch.from_numpy(arr[idx:end]) for name, arr in self.feature_groups.items()
         }
+        for name, arr in self.index_groups.items():
+            features[name] = torch.from_numpy(arr[idx:end])
         features["concatenated"] = torch.from_numpy(self._concatenated[idx:end])
         target = torch.from_numpy(self.data[end:target_end])
         return features, target

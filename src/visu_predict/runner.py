@@ -90,6 +90,13 @@ def _build_model(
         max_seq_length=config.max_seq_length,
         num_decoder_layers=config.num_decoder_layers,
         teacher_forcing_ratio=config.teacher_forcing_ratio,
+        model_pipeline=config.model_pipeline,
+        steps_per_day=config.steps_per_day or 288,
+        d_input=config.d_input,
+        d_tod=config.d_tod,
+        d_dow=config.d_dow,
+        d_adaptive=config.d_adaptive,
+        d_node=config.d_node,
     )
 
 

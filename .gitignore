@@ -67,3 +67,5 @@ _extracted/
 
 # Local-only working notebooks (not for the public repo).
 *.ipynb
+# Exception: the published Colab launcher notebook.
+!notebooks/train_colab.ipynb

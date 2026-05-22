@@ -12,7 +12,7 @@ import torch.nn as nn
 
 from visu_predict.models.positional import PositionalEncoding
 
-_RESERVED_KEYS = {"concatenated"}
+_RESERVED_KEYS = {"concatenated", "time_of_day_idx", "day_of_week_idx"}
 
 
 class FeatureAttention(nn.Module):
