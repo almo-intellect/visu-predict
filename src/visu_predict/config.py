@@ -34,6 +34,7 @@ VALID_DECODERS: tuple[str, ...] = ("linear", "mlp", "transformer")
 VALID_MISSING_STRATEGIES: tuple[str, ...] = (
     "ffill_bfill", "zero", "mean", "median", "interpolate",
 )
+VALID_MODEL_PIPELINES: tuple[str, ...] = ("legacy", "stae")
 
 
 @dataclass
@@ -131,6 +132,20 @@ class TrainingConfig:
 
     seed: int = 42
 
+    # --- STAE / SOTA upgrade (Tier 1+) ---
+    # Switching ``model_pipeline`` to "stae" enables the STAEformer-style path:
+    # a learnable adaptive embedding indexed by (time-of-day, sensor), plus
+    # discrete time-of-day / day-of-week lookup embeddings. Legacy is the
+    # default and reproduces the pre-Tier-1 model exactly.
+    model_pipeline: str = "legacy"
+    use_discrete_time_embeddings: bool = False
+    steps_per_day: int | None = None
+    d_input: int = 24
+    d_tod: int = 24
+    d_dow: int = 24
+    d_adaptive: int = 80
+    d_node: int = 0
+
     input_dir: str | None = None
     output_dir: str | None = None
     model_dir: str | None = None
@@ -188,6 +203,21 @@ class TrainingConfig:
             )
         if self.spatial_bias_type not in ("additive", "multiplicative"):
             raise ValueError(f"spatial_bias_type must be 'additive' or 'multiplicative', got {self.spatial_bias_type!r}")
+        if self.model_pipeline not in VALID_MODEL_PIPELINES:
+            raise ValueError(
+                f"model_pipeline must be one of {VALID_MODEL_PIPELINES}, got {self.model_pipeline!r}"
+            )
+        if self.model_pipeline == "stae":
+            if not self.use_discrete_time_embeddings:
+                raise ValueError(
+                    "model_pipeline='stae' requires use_discrete_time_embeddings=True"
+                )
+            stae_dim_sum = self.d_input + self.d_tod + self.d_dow + self.d_adaptive + self.d_node
+            if stae_dim_sum != self.hidden_dim:
+                raise ValueError(
+                    f"STAE pipeline requires d_input + d_tod + d_dow + d_adaptive + d_node "
+                    f"({stae_dim_sum}) to equal hidden_dim ({self.hidden_dim})"
+                )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

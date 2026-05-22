@@ -10,10 +10,13 @@ import torch
 import torch.nn as nn
 
 from visu_predict.models.attention import FeatureAttention
+from visu_predict.models.embeddings import STAEInputComposer
 from visu_predict.models.gnn import TORCH_GEOMETRIC_AVAILABLE, GCNEncoder
 from visu_predict.models.positional import PositionalEncoding
 
 FeatureInput = torch.Tensor | dict[str, torch.Tensor]
+
+VALID_MODEL_PIPELINES = ("legacy", "stae")
 
 
 class _AttnEncoderLayer(nn.TransformerEncoderLayer):
@@ -152,6 +155,13 @@ class TrafficTransformer(nn.Module):
         max_seq_length: int = 50_000,
         num_decoder_layers: int = 3,
         teacher_forcing_ratio: float = 0.2,
+        model_pipeline: str = "legacy",
+        steps_per_day: int = 288,
+        d_input: int = 24,
+        d_tod: int = 24,
+        d_dow: int = 24,
+        d_adaptive: int = 80,
+        d_node: int = 0,
     ) -> None:
         super().__init__()
         if hidden_dim % num_heads != 0:
@@ -162,6 +172,8 @@ class TrafficTransformer(nn.Module):
             raise ValueError(f"decoder_type must be 'linear', 'mlp', or 'transformer', got {decoder_type}")
         if use_gnn_pre_transformer and not TORCH_GEOMETRIC_AVAILABLE:
             raise ImportError("PyTorch Geometric required for GNN pre-transformer")
+        if model_pipeline not in VALID_MODEL_PIPELINES:
+            raise ValueError(f"model_pipeline must be one of {VALID_MODEL_PIPELINES}, got {model_pipeline}")
 
         self.input_dim = input_dim
         self.num_features = num_features
@@ -173,16 +185,37 @@ class TrafficTransformer(nn.Module):
         self.use_gnn_pre_transformer = use_gnn_pre_transformer
         self.use_spatial_bias = use_spatial_bias
         self.spatial_bias_type = spatial_bias_type
+        self.model_pipeline = model_pipeline
 
         self.feature_dims: dict[str, int] = feature_dims or {"traffic": input_dim}
         self.embedding = nn.Linear(input_dim, hidden_dim)
-        self.feature_attention = FeatureAttention(
-            feature_dims=self.feature_dims,
-            hidden_dim=hidden_dim,
-            num_heads=num_heads,
-            dropout=dropout,
-            max_seq_length=max_seq_length,
-        )
+
+        if model_pipeline == "stae":
+            stae_d_model = d_input + d_tod + d_dow + d_adaptive + d_node
+            if stae_d_model != hidden_dim:
+                raise ValueError(
+                    f"STAE pipeline requires d_input+d_tod+d_dow+d_adaptive+d_node "
+                    f"({stae_d_model}) to equal hidden_dim ({hidden_dim})"
+                )
+            self.stae_composer: STAEInputComposer | None = STAEInputComposer(
+                steps_per_day=steps_per_day,
+                num_sensors=num_features,
+                d_input=d_input,
+                d_tod=d_tod,
+                d_dow=d_dow,
+                d_adp=d_adaptive,
+                d_node=d_node,
+            )
+            self.feature_attention = None
+        else:
+            self.stae_composer = None
+            self.feature_attention = FeatureAttention(
+                feature_dims=self.feature_dims,
+                hidden_dim=hidden_dim,
+                num_heads=num_heads,
+                dropout=dropout,
+                max_seq_length=max_seq_length,
+            )
 
         if use_gnn_pre_transformer:
             self.gnn_encoder = GCNEncoder(
@@ -258,6 +291,9 @@ class TrafficTransformer(nn.Module):
         src: FeatureInput,
         adjacency_matrix: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        if self.model_pipeline == "stae":
+            return self._stae_encode(src)
+
         if isinstance(src, torch.Tensor):
             memory = self.embedding(src)
             memory = self.pos_encoder(memory.transpose(0, 1)).transpose(0, 1)
@@ -290,6 +326,39 @@ class TrafficTransformer(nn.Module):
         for layer in self.encoder:
             if spatial_bias is not None:
                 layer.set_spatial_bias(spatial_bias)
+            memory = layer(memory)
+        return memory
+
+    def _stae_encode(self, src: FeatureInput) -> torch.Tensor:
+        """STAE pipeline encoder.
+
+        Composes ``[B, T, N, d_model]`` via :class:`STAEInputComposer` and
+        feeds it into the existing temporal encoder stack. PR #1 reduces the
+        sensor axis to ``[B, T, d_model]`` by mean-pooling; PR #2 replaces
+        this with an alternating spatial↔temporal stack that keeps the
+        sensor axis end-to-end.
+        """
+        if not isinstance(src, dict):
+            raise TypeError("STAE pipeline requires a dict of features, not a raw tensor")
+        for required in ("traffic", "time_of_day_idx", "day_of_week_idx"):
+            if required not in src:
+                raise KeyError(
+                    f"STAE pipeline requires {required!r} in the feature dict; "
+                    f"got keys {sorted(src.keys())}"
+                )
+        assert self.stae_composer is not None
+
+        composed = self.stae_composer(
+            traffic=src["traffic"],
+            tod_idx=src["time_of_day_idx"].long(),
+            dow_idx=src["day_of_week_idx"].long(),
+        )  # [B, T, N, d_model]
+
+        # Temporary reduction to feed the existing temporal encoder; PR #2
+        # replaces this with an alternating spatial/temporal stack.
+        memory = composed.mean(dim=2)  # [B, T, d_model]
+
+        for layer in self.encoder:
             memory = layer(memory)
         return memory
 

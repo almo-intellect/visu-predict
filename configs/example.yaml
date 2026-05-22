@@ -85,3 +85,16 @@ enable_transfer_learning: false
 freeze_encoder: true
 freeze_layers: 1
 transfer_learning_rate: 5e-5
+
+# --- STAE pipeline (Tier 1 SOTA upgrade) -------------------------------------
+# To switch to the STAEformer-style architecture, uncomment the block below.
+# The d_* sizes must sum to hidden_dim. The defaults below assume hidden_dim=336.
+#
+# model_pipeline: stae            # "legacy" (default) or "stae"
+# use_discrete_time_embeddings: true
+# steps_per_day: 288              # null to auto-infer from timestamp index
+# d_input: 24
+# d_tod: 24
+# d_dow: 24
+# d_adaptive: 264                 # d_input + d_tod + d_dow + d_adaptive + d_node = hidden_dim
+# d_node: 0
