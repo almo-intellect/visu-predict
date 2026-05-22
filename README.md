@@ -2,6 +2,8 @@
 
 **English** · [Português (Portugal)](README.pt-PT.md)
 
+[![CI](https://github.com/almo-intellect/visu-predict/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/almo-intellect/visu-predict/actions/workflows/ci.yml)
+
 Transformer-based traffic forecasting toolkit. Predicts short-horizon traffic
 speed/flow for sensor networks (METR-LA, PEMS-BAY, PEMS-03/04/07/08, custom
 datasets) using an encoder–decoder Transformer with optional graph neural

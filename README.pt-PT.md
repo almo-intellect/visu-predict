@@ -2,6 +2,8 @@
 
 [English](README.md) · **Português (Portugal)**
 
+[![CI](https://github.com/almo-intellect/visu-predict/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/almo-intellect/visu-predict/actions/workflows/ci.yml)
+
 Conjunto de ferramentas para previsão de tráfego baseado em *Transformers*.
 Faz previsões de curto horizonte de velocidade ou fluxo de tráfego em redes
 de sensores (METR-LA, PEMS-BAY, PEMS-03/04/07/08 ou conjuntos de dados
