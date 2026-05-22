@@ -102,6 +102,9 @@ def _build_model(
         num_st_layers=config.num_st_layers,
         use_adaptive_adjacency=config.use_adaptive_adjacency,
         adaptive_adj_dim=config.adaptive_adj_dim,
+        use_temporal_patching=config.use_temporal_patching,
+        patch_length=config.patch_length,
+        patch_stride=config.patch_stride,
     )
 
 
