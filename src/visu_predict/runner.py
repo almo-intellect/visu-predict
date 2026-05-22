@@ -97,6 +97,9 @@ def _build_model(
         d_dow=config.d_dow,
         d_adaptive=config.d_adaptive,
         d_node=config.d_node,
+        seq_length=config.seq_length,
+        interleave_order=config.interleave_order,
+        num_st_layers=config.num_st_layers,
     )
 
 
