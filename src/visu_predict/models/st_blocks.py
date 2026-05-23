@@ -132,6 +132,7 @@ class STAttnStack(nn.Module):
         ff_multiplier: int = 4,
         interleave_order: str = "TS",
         temporal_block_factory: Callable[[], nn.Module] | None = None,
+        spatial_block_factory: Callable[[], nn.Module] | None = None,
     ) -> None:
         super().__init__()
         if interleave_order not in ("TS", "ST"):
@@ -141,12 +142,15 @@ class STAttnStack(nn.Module):
         if temporal_block_factory is None:
             def temporal_block_factory() -> nn.Module:
                 return TemporalBlock(d_model, num_heads, dropout, ff_multiplier)
+        if spatial_block_factory is None:
+            def spatial_block_factory() -> nn.Module:
+                return SpatialBlock(d_model, num_heads, dropout, ff_multiplier)
 
         self.temporal_blocks = nn.ModuleList(
             temporal_block_factory() for _ in range(num_layers)
         )
         self.spatial_blocks = nn.ModuleList(
-            SpatialBlock(d_model, num_heads, dropout, ff_multiplier) for _ in range(num_layers)
+            spatial_block_factory() for _ in range(num_layers)
         )
 
     def forward(self, x: torch.Tensor, spatial_attn_bias: torch.Tensor | None = None) -> torch.Tensor:

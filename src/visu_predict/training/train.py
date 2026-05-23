@@ -58,6 +58,16 @@ def _compute_loss(
     return criterion(output, target)
 
 
+def _maybe_add_moe_loss(loss: torch.Tensor, model: nn.Module, config: TrainingConfig) -> torch.Tensor:
+    """Add the MoE load-balancing auxiliary loss when the model exposes one."""
+    if not getattr(config, "use_moe", False) or not hasattr(model, "collect_moe_aux_loss"):
+        return loss
+    aux = model.collect_moe_aux_loss()
+    if aux is None:
+        return loss
+    return loss + config.moe_load_balance_weight * aux
+
+
 def _forward(
     model: nn.Module,
     data: Any,
@@ -116,11 +126,13 @@ def train(
             if use_amp:
                 with autocast(**_AMP_KWARGS):
                     output = _forward(model, data, target, adj_on_device, config, teacher_forcing=True)
-                    loss = _compute_loss(output, target, criterion, config) / config.accumulation_steps
+                    loss = _compute_loss(output, target, criterion, config)
+                    loss = _maybe_add_moe_loss(loss, model, config) / config.accumulation_steps
                 scaler.scale(loss).backward()
             else:
                 output = _forward(model, data, target, adj_on_device, config, teacher_forcing=True)
-                loss = _compute_loss(output, target, criterion, config) / config.accumulation_steps
+                loss = _compute_loss(output, target, criterion, config)
+                loss = _maybe_add_moe_loss(loss, model, config) / config.accumulation_steps
                 loss.backward()
 
             is_step = (batch_idx + 1) % config.accumulation_steps == 0 or (batch_idx + 1) == len(train_loader)

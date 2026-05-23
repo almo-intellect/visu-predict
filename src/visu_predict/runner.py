@@ -107,6 +107,7 @@ def _build_model(
         patch_length=config.patch_length,
         patch_stride=config.patch_stride,
         temporal_block_type=config.temporal_block_type,
+        use_moe=config.use_moe,
     )
 
 
@@ -161,6 +162,9 @@ def run_training(config: TrainingConfig, data_path: str | Path) -> dict[str, obj
     feature_dims = {k: v for k, v in train_ds.feature_dims.items()}
 
     model = _build_model(sample_features, feature_dims, num_features, config)
+
+    if config.use_moe and adjacency_tensor is not None and hasattr(model, "set_static_adjacency"):
+        model.set_static_adjacency(adjacency_tensor)
 
     if config.enable_transfer_learning and config.source_model_path:
         model = load_pretrained(model, config.source_model_path)

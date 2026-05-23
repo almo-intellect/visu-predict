@@ -157,6 +157,8 @@ class TrainingConfig:
     pretrain_num_epochs: int = 50
     pretrained_encoder_path: str | None = None
     temporal_block_type: str = "attention"
+    use_moe: bool = False
+    moe_load_balance_weight: float = 0.01
 
     input_dir: str | None = None
     output_dir: str | None = None
