@@ -13,6 +13,7 @@ from visu_predict.models.adaptive_graph import AdaptiveAdjacency
 from visu_predict.models.attention import FeatureAttention
 from visu_predict.models.embeddings import STAEInputComposer
 from visu_predict.models.gnn import TORCH_GEOMETRIC_AVAILABLE, GCNEncoder
+from visu_predict.models.mamba_block import MAMBA_AVAILABLE, MambaTemporalBlock
 from visu_predict.models.patching import PatchEmbed
 from visu_predict.models.positional import PositionalEncoding
 from visu_predict.models.st_blocks import STAttnStack
@@ -174,6 +175,7 @@ class TrafficTransformer(nn.Module):
         use_temporal_patching: bool = False,
         patch_length: int = 4,
         patch_stride: int | None = None,
+        temporal_block_type: str = "attention",
     ) -> None:
         super().__init__()
         if hidden_dim % num_heads != 0:
@@ -219,6 +221,21 @@ class TrafficTransformer(nn.Module):
                 d_node=d_node,
             )
             self.feature_attention = None
+            temporal_factory = None
+            if temporal_block_type == "mamba":
+                if not MAMBA_AVAILABLE:
+                    raise ImportError(
+                        "temporal_block_type='mamba' requires mamba-ssm. "
+                        "Install with `pip install visu-predict[mamba]` (CUDA required)."
+                    )
+
+                def temporal_factory() -> nn.Module:
+                    return MambaTemporalBlock(d_model=hidden_dim)
+            elif temporal_block_type != "attention":
+                raise ValueError(
+                    f"temporal_block_type must be 'attention' or 'mamba', got {temporal_block_type!r}"
+                )
+
             self.stae_attn_stack: STAttnStack | None = STAttnStack(
                 d_model=hidden_dim,
                 num_heads=num_heads,
@@ -226,6 +243,7 @@ class TrafficTransformer(nn.Module):
                 dropout=dropout,
                 ff_multiplier=ff_dim_multiplier,
                 interleave_order=interleave_order,
+                temporal_block_factory=temporal_factory,
             )
             self.stae_patch: PatchEmbed | None = None
             head_in_steps = seq_length

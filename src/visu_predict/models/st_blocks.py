@@ -10,6 +10,7 @@ a turn at both kinds of mixing, in the STAEformer / STPFormer style.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
 import torch
 import torch.nn as nn
@@ -130,13 +131,19 @@ class STAttnStack(nn.Module):
         dropout: float = 0.1,
         ff_multiplier: int = 4,
         interleave_order: str = "TS",
+        temporal_block_factory: Callable[[], nn.Module] | None = None,
     ) -> None:
         super().__init__()
         if interleave_order not in ("TS", "ST"):
             raise ValueError(f"interleave_order must be 'TS' or 'ST', got {interleave_order!r}")
         self.interleave_order = interleave_order
+
+        if temporal_block_factory is None:
+            def temporal_block_factory() -> nn.Module:
+                return TemporalBlock(d_model, num_heads, dropout, ff_multiplier)
+
         self.temporal_blocks = nn.ModuleList(
-            TemporalBlock(d_model, num_heads, dropout, ff_multiplier) for _ in range(num_layers)
+            temporal_block_factory() for _ in range(num_layers)
         )
         self.spatial_blocks = nn.ModuleList(
             SpatialBlock(d_model, num_heads, dropout, ff_multiplier) for _ in range(num_layers)
