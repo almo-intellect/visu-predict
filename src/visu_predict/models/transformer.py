@@ -14,6 +14,7 @@ from visu_predict.models.attention import FeatureAttention
 from visu_predict.models.embeddings import STAEInputComposer
 from visu_predict.models.gnn import TORCH_GEOMETRIC_AVAILABLE, GCNEncoder
 from visu_predict.models.mamba_block import MAMBA_AVAILABLE, MambaTemporalBlock
+from visu_predict.models.moe import STMoE
 from visu_predict.models.patching import PatchEmbed
 from visu_predict.models.positional import PositionalEncoding
 from visu_predict.models.st_blocks import STAttnStack
@@ -176,6 +177,7 @@ class TrafficTransformer(nn.Module):
         patch_length: int = 4,
         patch_stride: int | None = None,
         temporal_block_type: str = "attention",
+        use_moe: bool = False,
     ) -> None:
         super().__init__()
         if hidden_dim % num_heads != 0:
@@ -236,7 +238,25 @@ class TrafficTransformer(nn.Module):
                     f"temporal_block_type must be 'attention' or 'mamba', got {temporal_block_type!r}"
                 )
 
-            self.stae_attn_stack: STAttnStack | None = STAttnStack(
+            spatial_factory = None
+            if use_moe:
+                if not use_adaptive_adjacency:
+                    raise ValueError("use_moe=True requires use_adaptive_adjacency=True")
+                # Adaptive adjacency is constructed below; close over a getter
+                # so the factory can resolve it after self.adaptive_adj is set.
+                model_ref = self
+
+                def spatial_factory() -> nn.Module:
+                    assert model_ref.adaptive_adj is not None
+                    return STMoE(
+                        d_model=hidden_dim,
+                        num_sensors=num_features,
+                        adaptive_adj=model_ref.adaptive_adj,
+                    )
+
+            self.use_moe = use_moe
+            self.stae_attn_stack: STAttnStack | None = None
+            self._stae_stack_args = dict(
                 d_model=hidden_dim,
                 num_heads=num_heads,
                 num_layers=num_st_layers or num_layers,
@@ -244,6 +264,7 @@ class TrafficTransformer(nn.Module):
                 ff_multiplier=ff_dim_multiplier,
                 interleave_order=interleave_order,
                 temporal_block_factory=temporal_factory,
+                spatial_block_factory=spatial_factory,
             )
             self.stae_patch: PatchEmbed | None = None
             head_in_steps = seq_length
@@ -281,6 +302,8 @@ class TrafficTransformer(nn.Module):
             self.mask_token = None
             self.reconstruction_head = None
             self.use_temporal_patching = False
+            self.use_moe = False
+            self._stae_stack_args = None
             self.feature_attention = FeatureAttention(
                 feature_dims=self.feature_dims,
                 hidden_dim=hidden_dim,
@@ -298,6 +321,13 @@ class TrafficTransformer(nn.Module):
             if use_adaptive_adjacency
             else None
         )
+
+        # Construct the STAE alternating stack now that adaptive_adj exists
+        # (the MoE spatial-block factory may reference it).
+        if model_pipeline == "stae":
+            assert self._stae_stack_args is not None
+            self.stae_attn_stack = STAttnStack(**self._stae_stack_args)
+            self._stae_stack_args = None  # drop the temporary kwargs holder
 
         if use_gnn_pre_transformer:
             self.gnn_encoder = GCNEncoder(
@@ -560,6 +590,33 @@ class TrafficTransformer(nn.Module):
 
         output = self.decoder(memory[:, -1, :])
         return output.view(-1, self.pred_len, self.num_features)
+
+    def collect_moe_aux_loss(self) -> torch.Tensor | None:
+        """Sum auxiliary load-balancing losses from any MoE spatial blocks.
+
+        Returns ``None`` if MoE is disabled or no MoE blocks have run yet.
+        """
+        if not self.use_moe or self.stae_attn_stack is None:
+            return None
+        losses = [
+            block.last_aux_loss for block in self.stae_attn_stack.spatial_blocks
+            if isinstance(block, STMoE) and block.last_aux_loss is not None
+        ]
+        if not losses:
+            return None
+        return torch.stack(losses).sum()
+
+    def set_static_adjacency(self, adj: torch.Tensor) -> None:
+        """Inject a static adjacency into every MoE identity expert.
+
+        No-op when MoE is disabled. The caller is responsible for passing a
+        ``[num_features, num_features]`` tensor.
+        """
+        if not self.use_moe or self.stae_attn_stack is None:
+            return
+        for block in self.stae_attn_stack.spatial_blocks:
+            if isinstance(block, STMoE):
+                block.set_static_adjacency(adj)
 
     def freeze_layers(self, freeze_encoder: bool = True, num_layers: int = 1) -> None:
         """Freeze embedding + first N encoder layers (for transfer learning)."""
