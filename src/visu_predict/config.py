@@ -156,6 +156,7 @@ class TrainingConfig:
     mask_ratio: float = 0.25
     pretrain_num_epochs: int = 50
     pretrained_encoder_path: str | None = None
+    temporal_block_type: str = "attention"
 
     input_dir: str | None = None
     output_dir: str | None = None
@@ -218,6 +219,10 @@ class TrainingConfig:
             raise ValueError(
                 "adaptive_adj_inject_into must be 'spatial_attn', 'gnn', or 'both', "
                 f"got {self.adaptive_adj_inject_into!r}"
+            )
+        if self.temporal_block_type not in ("attention", "mamba"):
+            raise ValueError(
+                f"temporal_block_type must be 'attention' or 'mamba', got {self.temporal_block_type!r}"
             )
         if self.model_pipeline not in VALID_MODEL_PIPELINES:
             raise ValueError(

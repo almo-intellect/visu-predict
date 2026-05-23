@@ -34,6 +34,7 @@ dependencies = [
 [project.optional-dependencies]
 gnn = ["torch-geometric>=2.4"]
 holidays = ["holidays>=0.40"]
+mamba = ["mamba-ssm>=2.0"]
 dev = [
     "pytest>=7.4",
     "pytest-cov>=4.1",
@@ -41,7 +42,7 @@ dev = [
     "mypy>=1.7",
 ]
 all = [
-    "visu-predict[gnn,holidays,dev]",
+    "visu-predict[gnn,holidays,mamba,dev]",
 ]
 
 [project.scripts]

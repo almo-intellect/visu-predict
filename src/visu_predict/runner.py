@@ -106,6 +106,7 @@ def _build_model(
         use_temporal_patching=config.use_temporal_patching,
         patch_length=config.patch_length,
         patch_stride=config.patch_stride,
+        temporal_block_type=config.temporal_block_type,
     )
 
 
