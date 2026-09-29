@@ -1,0 +1,12 @@
+# data and training artefacts are not versioned (see README: Data)
+Transformers_Input/
+data/
+*.csv
+*.pkl
+*.npz
+*.pt
+*.pth
+results/benchmark/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/

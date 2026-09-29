@@ -1,0 +1,114 @@
+# ============================================================================
+# Traffic Transformer - Configuration File
+# ============================================================================
+# Copy this file to your data directory and edit as needed.
+# Usage:  config = load_config("path/to/config.yaml")
+# All fields are optional - defaults from TrainingConfig are used if omitted.
+# ============================================================================
+
+# -- Reproducibility --------------------------------------------------------
+seed: 42
+
+# -- Google Drive paths (Colab) --------------------------------------------
+# DRIVE_BASE: '/content/drive/Shareddrives/Almo-2002-R&D/1 - RD-Traffic-Prediction'
+# DRIVE_PROJECT: '/content/drive/Shareddrives/Almo-2002-R&D/1 - RD-Traffic-Prediction/Transformer_Versions/COLAB_NOBASELINE_V14-6'
+
+# -- Directories ------------------------------------------------------------
+# input_dir:  where training CSV files, adjacency matrices, etc. live
+# output_dir: where results are written (timestamped subdirs are created)
+# If omitted, input_dir defaults to DRIVE_PROJECT/Transformers_Input
+# and output_dir is created under base_output_dir.
+# input_dir: '/content/traffic_project/data'
+# output_dir: '/content/traffic_project/results'
+base_output_dir: ''
+
+# -- Dataset ----------------------------------------------------------------
+dataset_name: 'PEMS-BAY'
+num_sensors: 325
+
+# -- Core training ----------------------------------------------------------
+batch_size: 16
+num_epochs: 1000
+patience: 30
+learning_rate: 0.0001
+gradient_clip: 1.0
+
+# -- Model architecture ----------------------------------------------------
+hidden_dim: 336
+num_layers: 3
+num_heads: 16
+dropout: 0.05
+ff_dim_multiplier: 4
+activation: 'gelu'
+seq_length: 12
+pred_length: 12
+
+# -- Decoder ----------------------------------------------------------------
+decoder_type: 'linear'          # 'linear' or 'transformer'
+num_decoder_layers: 3
+dim_feedforward: 336
+teacher_forcing_ratio: 0.20
+# teacher_forcing_start: 1.0    # scheduled sampling start ratio
+# teacher_forcing_end: 0.0      # scheduled sampling end ratio
+# teacher_forcing_decay_epochs:  # null = no scheduling
+
+# -- Optimiser & scheduler -------------------------------------------------
+optimizer_type: 'adamw'
+scheduler_type: 'cosine_warmup'
+warmup_epochs: 30
+loss_function: 'mae'            # 'mae', 'mse', 'huber', 'quantile', 'hybrid'
+data_scaler_type: 'minmax'
+
+# -- Mixed precision & accumulation ----------------------------------------
+use_mixed_precision: true
+accumulation_steps: 8
+num_workers: 2
+pin_memory: true
+
+# -- Feature flags ----------------------------------------------------------
+use_time_features: true
+use_holiday_feature: false
+holiday_country_code: 'US'
+use_weather_feature: false
+weather_feature_type: 'all_features'
+# weather_data_file: null       # auto-resolved per dataset if null
+use_lagged_features: false
+num_lags: 1
+
+# -- Spatial / GNN ----------------------------------------------------------
+use_spatial_features: false
+spatial_feature_dim: 336
+use_gnn_pre_transformer: false
+gnn_type: 'gcn'                 # 'gcn' or 'gat'
+gat_heads: 16
+gnn_layers: 3
+use_spatial_bias: false
+spatial_bias_type: 'additive'
+
+# -- Attention visualisation ------------------------------------------------
+attention_visualization: true
+attention_head_analysis: true
+visualize_layer_progression: true
+
+# -- Output -----------------------------------------------------------------
+save_predictions: true
+num_sensors_to_plot: 25
+generate_report: true
+
+# -- Data processing --------------------------------------------------------
+missing_value_strategy: 'mean'  # 'ffill_bfill', 'zero', 'mean', 'median', 'interpolate'
+time_format: '%Y-%m-%d %H:%M:%S'
+
+# -- Quantile regression (optional) ----------------------------------------
+use_quantile_regression: false
+# quantiles: [0.1, 0.5, 0.9]
+
+# -- Transfer learning (set enable_transfer_learning: true to activate) -----
+enable_transfer_learning: false
+# source_model_path: null
+# target_dataset_name: 'METR-MPT'
+# target_data_path: null
+# freeze_encoder: true
+# freeze_layers: 1
+# adapter_dim: 64
+# transfer_learning_rate: 0.00005
