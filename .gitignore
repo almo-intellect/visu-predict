@@ -30,7 +30,7 @@ env/
 # Claude Code per-user settings (the shared .claude/settings.json may be committed)
 .claude/settings.local.json
 
-# Testing / type checking
+# Testing / linting
 .pytest_cache/
 .coverage
 .coverage.*
@@ -39,10 +39,19 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
-# Jupyter
+# Jupyter: local working notebooks stay out of the repo, except the published ones
 .ipynb_checkpoints/
+*.ipynb
+!notebooks/*.ipynb
 
-# ML artefacts and outputs
+# Data and training outputs (see DATA.md); `visu-predict download` writes to data/,
+# training writes to runs/
+data/
+runs/
+outputs/
+logs/
+Transformers_Input/
+*.csv
 *.pkl
 *.pt
 *.pth
@@ -50,20 +59,7 @@ htmlcov/
 *.h5
 *.npy
 *.npz
-outputs/
-runs/
-logs/
-wandb/
-
-# Data (don't commit large datasets)
-data/
-*.csv
-!configs/*.csv
-!tests/fixtures/*.csv
 
 # Internal scratch
 _extracted/
 *.bak
-
-# Local-only working notebooks (not for the public repo).
-*.ipynb
