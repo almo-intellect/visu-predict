@@ -1,172 +1,529 @@
-"""Traffic dataset and preprocessing pipeline."""
+"""
+Benchmark-protocol data pipeline for node-level spatio-temporal models.
 
-from __future__ import annotations
+What the protocol fixes, and why it matters:
 
-import logging
+* Targets stay RAW. Zeros in METR-LA / PEMS-BAY are sensor faults; they are
+  kept in the targets and masked out of loss and metrics (DCRNN protocol)
+  instead of being overwritten with the sensor mean, which made earlier test
+  metrics incomparable with published results.
+* Windows follow the DCRNN convention (x = 12 past steps, y = next 12 steps)
+  and are split 70/10/20 by window index, so the test windows are the same
+  ones used in the literature.
+* Inputs are z-scored with statistics of the training portion only.
+* Calendar information is given as integer indices at the data resolution:
+  time-of-day slot (288 per day for 5-minute data) and day-of-week (optionally
+  "holiday" as an 8th day type), consumed by embedding tables in the model.
+* Weather (optional) is converted from its source timezone to the traffic
+  timezone, matched causally (latest observation at or before t), z-scored on
+  the training period, and paired with an availability flag, so periods with no
+  weather data are explicit instead of silently repeating the last row.
+
+Batches are produced by :class:`WindowBatcher`, which keeps the whole series on
+the target device and gathers windows with index arithmetic (no DataLoader
+workers, no per-sample Python overhead).
+
+Input files for a dataset called ``NAME`` (see DATA.md):
+
+* ``<input_dir>/NAME.csv``: first column = timestamps, one column per sensor.
+* ``<input_dir>/adj_NAME.pkl`` or ``adj_NAME.npy`` (optional): adjacency matrix.
+* ``<input_dir>/weather_NAME_era5_local.csv`` (optional): hourly weather in
+  local time, e.g. built with ``visu-predict weather``.
+"""
+
+import os
+import pickle
 import warnings
-from pathlib import Path
-from typing import Any
+from collections.abc import Iterator, Sequence
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
-from torch.utils.data import Dataset
 
-from visu_predict.config import TrainingConfig
-from visu_predict.features.weather import WeatherIntegration
-
-logger = logging.getLogger(__name__)
-
-try:
+try:  # optional
     import holidays as _holidays
+
     HOLIDAYS_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover
     _holidays = None
     HOLIDAYS_AVAILABLE = False
 
 
-def _make_scaler(kind: str):
+# Weather metadata for the two benchmark datasets. ``weather_file`` is the
+# rebuilt hourly series (local wall-clock time, covering the whole traffic
+# period; see ``visu-predict weather``). ``weather_file_legacy`` is the original
+# export, kept only as a fallback: it is stamped in UTC, PEMS-BAY stops a month
+# before the traffic data ends, hourly values were forward-filled for up to 72 h
+# and METR-LA precipitation never drops below 0.01.
+DATASET_META: dict[str, dict[str, str]] = {
+    "PEMS-BAY": {"traffic_tz": "US/Pacific", "weather_tz": "US/Pacific",
+                 "weather_file": "weather_PEMS-BAY_era5_local.csv",
+                 "weather_file_legacy": "clean_weather_data_pems_bay.csv",
+                 "legacy_weather_tz": "UTC", "country": "US"},
+    "METR-LA": {"traffic_tz": "US/Pacific", "weather_tz": "US/Pacific",
+                "weather_file": "weather_METR-LA_era5_local.csv",
+                "weather_file_legacy": "clean_weather_data_metr_la.csv",
+                "legacy_weather_tz": "UTC", "country": "US"},
+}
+
+# Columns used as numeric weather inputs when present (the rebuilt files add
+# cloud cover, pressure and gusts; the legacy files carry visibility instead).
+WEATHER_NUMERIC = [
+    "temperature", "hourly_precipitation", "visibility",
+    "wind_speed", "wind_gust", "relative_humidity", "dew_point",
+    "cloud_cover_pct", "surface_pressure",
+]
+
+DOWNLOAD_HINT = ("download METR-LA / PEMS-BAY with `visu-predict download --dest <dir>`, "
+                 "or see DATA.md for the file format of your own data")
+
+
+# =============================================================================
+# Scaler
+# =============================================================================
+
+class ZScoreScaler:
+    """Global z-score scaler (single mean/std, as in the benchmark lineage)."""
+
+    def __init__(self, mean: float, std: float) -> None:
+        self.mean = float(mean)
+        self.std = float(std) if std > 0 else 1.0
+
+    def transform(self, x):
+        return (x - self.mean) / self.std
+
+    def inverse_transform(self, x):
+        return x * self.std + self.mean
+
+    def state_dict(self) -> dict[str, float]:
+        return {"mean": self.mean, "std": self.std}
+
+    @classmethod
+    def from_state_dict(cls, state: dict[str, float]) -> "ZScoreScaler":
+        return cls(state["mean"], state["std"])
+
+
+# =============================================================================
+# Loading helpers
+# =============================================================================
+
+def load_traffic_frame(input_dir: str, dataset_name: str) -> pd.DataFrame:
+    """Read ``<input_dir>/<dataset_name>.csv`` (index = timestamps)."""
+    path = os.path.join(input_dir, f"{dataset_name}.csv")
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"{path} not found - {DOWNLOAD_HINT}")
+    df = pd.read_csv(path, index_col=0)
+    df.index = pd.to_datetime(df.index)
+    df = df.sort_index()
+    return df.astype(np.float32)
+
+
+def load_adjacency(path: str) -> tuple[np.ndarray, list[str]]:
+    """Load an adjacency matrix and its sensor ids.
+
+    Accepts ``.npy`` files and pickles holding either a bare array or the DCRNN
+    list ``[sensor_ids, {sensor_id: index}, adj_mx]`` (the original METR-LA /
+    PEMS-BAY pickles are Python 2 pickles and need ``encoding="latin1"``).
+    """
+    if path.endswith(".npy"):
+        adj = np.load(path)
+        return adj.astype(np.float32), [str(i) for i in range(adj.shape[0])]
+    with open(path, "rb") as f:
+        raw = f.read()
+    with warnings.catch_warnings():
+        # NumPy >= 2.4 warns about the dtype encoding inside these Python 2 pickles
+        warnings.simplefilter("ignore", getattr(np, "exceptions", np).VisibleDeprecationWarning)
+        try:
+            obj = pickle.loads(raw)
+        except UnicodeDecodeError:
+            obj = pickle.loads(raw, encoding="latin1")
+    if isinstance(obj, (list, tuple)) and len(obj) == 3:
+        sensor_ids, _, adj = obj
+        return np.asarray(adj, dtype=np.float32), [str(s) for s in sensor_ids]
+    if isinstance(obj, np.ndarray):
+        return obj.astype(np.float32), [str(i) for i in range(obj.shape[0])]
+    raise ValueError(f"unrecognised adjacency format in {path}: {type(obj).__name__}")
+
+
+def find_adjacency_file(input_dir: str, dataset_name: str) -> str | None:
+    candidates = [
+        f"adj_{dataset_name}.pkl",
+        f"adj_{dataset_name}.npy",
+        f"adj_mx_{dataset_name.lower().replace('-', '_')}.pkl",
+        f"adj_{dataset_name.replace('-', '')}.pkl",
+    ]
+    for c in candidates:
+        p = os.path.join(input_dir, c)
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def calendar_indices(
+    timestamps: pd.DatetimeIndex,
+    steps_per_day: int,
+    holiday_country: str | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return (time-of-day slot, day-of-week, holiday flag) per timestamp."""
+    ts = pd.DatetimeIndex(timestamps)
+    minutes = ts.hour * 60 + ts.minute
+    slot_minutes = 1440 // steps_per_day
+    tod = (np.asarray(minutes) // slot_minutes).astype(np.int64)
+    dow = np.asarray(ts.dayofweek, dtype=np.int64)
+    hol = np.zeros(len(ts), dtype=np.int64)
+    if holiday_country:
+        if HOLIDAYS_AVAILABLE:
+            years = sorted(set(ts.year))
+            cal = _holidays.country_holidays(holiday_country, years=years)
+            dates = np.array(ts.date)
+            hol = np.array([d in cal for d in dates], dtype=np.int64)
+        else:
+            warnings.warn("holidays package missing (pip install 'visu-predict[holidays]'); "
+                          "holiday flag disabled", stacklevel=2)
+    return tod, dow, hol
+
+
+def dcrnn_window_splits(
+    num_timesteps: int,
+    in_steps: int,
+    out_steps: int,
+    ratios: Sequence[float] = (0.7, 0.1, 0.2),
+) -> dict[str, np.ndarray]:
+    """Window start indices split like DCRNN's ``generate_training_data.py``.
+
+    Window ``s`` uses x = [s, s+in) and y = [s+in, s+in+out).
+    """
+    num_samples = num_timesteps - in_steps - out_steps + 1
+    num_test = round(num_samples * ratios[2])
+    num_train = round(num_samples * ratios[0])
+    num_val = num_samples - num_test - num_train
+    starts = np.arange(num_samples, dtype=np.int64)
     return {
-        "minmax": MinMaxScaler(),
-        "standard": StandardScaler(),
-        "robust": RobustScaler(),
-    }[kind]
+        "train": starts[:num_train],
+        "val": starts[num_train:num_train + num_val],
+        "test": starts[num_train + num_val:],
+    }
 
 
-def prepare_data(
-    df: pd.DataFrame, config: TrainingConfig,
-) -> tuple[np.ndarray, pd.DatetimeIndex, Any, int]:
-    """Apply missing-value handling and scaling. Returns (data, timestamps, scaler, num_features)."""
-    if config.missing_value_strategy == "ffill_bfill":
-        df = df.replace(0.0, np.nan).ffill().bfill()
-    elif config.missing_value_strategy == "zero":
-        df = df.fillna(0.0)
-    elif config.missing_value_strategy == "mean":
-        df = df.replace(0.0, np.nan).fillna(df.mean(numeric_only=True))
-    elif config.missing_value_strategy == "median":
-        df = df.replace(0.0, np.nan).fillna(df.median(numeric_only=True))
-    elif config.missing_value_strategy == "interpolate":
-        df = df.replace(0.0, np.nan).interpolate(method="time").ffill().bfill()
+def load_weather_features(
+    path: str,
+    timestamps: pd.DatetimeIndex,
+    fit_end: int,
+    traffic_tz: str | None = "US/Pacific",
+    weather_tz: str | None = "UTC",
+    tolerance: str = "90min",
+) -> tuple[np.ndarray, list[str]]:
+    """City-level weather aligned to traffic timestamps.
 
-    timestamps = df.index
-    sensor_data = df.to_numpy(dtype=np.float32)
-    num_features = sensor_data.shape[1]
+    Returns an array ``(T, E)`` of z-scored features plus an availability flag
+    (last column) and the list of feature names. Matching is causal (latest
+    observation at or before each traffic timestamp). Timestamps are converted
+    from ``weather_tz`` to ``traffic_tz`` when both are given and differ.
+    """
+    w = pd.read_csv(path)
+    time_col = "datetime" if "datetime" in w.columns else w.columns[0]
+    wt = pd.to_datetime(w[time_col])
+    if weather_tz and traffic_tz and weather_tz != traffic_tz:
+        wt = wt.dt.tz_localize(weather_tz).dt.tz_convert(traffic_tz).dt.tz_localize(None)
+    w = w.assign(_t=wt.values).drop(columns=[time_col]).sort_values("_t")
 
-    scaler = _make_scaler(config.data_scaler_type)
-    data_normalized = scaler.fit_transform(sensor_data).astype(np.float32)
-    return data_normalized, timestamps, scaler, num_features
+    feats = pd.DataFrame({"_t": w["_t"].values})
+    names: list[str] = []
+    for col in WEATHER_NUMERIC:
+        if col in w.columns:
+            v = pd.to_numeric(w[col], errors="coerce").astype(float)
+            if col == "hourly_precipitation":
+                v = np.log1p(v.clip(lower=0))
+            feats[col] = v.values
+            names.append(col)
+    if "weather_condition" in w.columns:
+        cond = w["weather_condition"].astype(str).str.lower()
+        flags = {
+            "is_rain": cond.str.contains("rain|drizzle|shower|storm|thunder"),
+            "is_fog": cond.str.contains("fog|haze|mist|smoke"),
+            "is_cloudy": cond.str.contains("cloud|overcast"),
+        }
+        for k, v in flags.items():
+            feats[k] = v.astype(float).values
+            names.append(k)
 
+    left = pd.DataFrame({"_t": pd.DatetimeIndex(timestamps).values})
+    merged = pd.merge_asof(
+        left, feats, on="_t", direction="backward",
+        tolerance=pd.Timedelta(tolerance),
+    )
+    arr = merged[names].to_numpy(dtype=np.float64)
+    available = ~np.isnan(arr).any(axis=1)
 
-def load_traffic_dataframe(path: str | Path) -> pd.DataFrame:
-    """Load a traffic CSV with timestamp index parsed as datetime."""
-    path = Path(path)
-    return pd.read_csv(path, index_col=0, parse_dates=True)
-
-
-def _create_time_features(timestamps: pd.DatetimeIndex) -> np.ndarray:
-    t = pd.to_datetime(timestamps)
-    return np.stack(
-        [
-            t.hour.values / 23.0,
-            t.dayofweek.values / 6.0,
-            (t.dayofyear // 7).values / 51.0,
-            t.month.values / 11.0,
-        ],
-        axis=1,
-    ).astype(np.float32)
-
-
-def _create_holiday_feature(timestamps: pd.DatetimeIndex, country_code: str) -> np.ndarray:
-    if not HOLIDAYS_AVAILABLE:
-        warnings.warn("holidays package not installed; holiday feature is zeros.", stacklevel=2)
-        return np.zeros((len(timestamps), 1), dtype=np.float32)
-
-    dates = pd.to_datetime(timestamps).date
-    years = {d.year for d in dates}
-    try:
-        cal = _holidays.country_holidays(country_code, years=years)
-    except (KeyError, NotImplementedError):
-        warnings.warn(f"Unknown country code {country_code!r}; defaulting to US.", stacklevel=2)
-        cal = _holidays.country_holidays("US", years=years)
-    return np.array([(1.0 if d in cal else 0.0) for d in dates], dtype=np.float32).reshape(-1, 1)
-
-
-def _create_lagged_features(data: np.ndarray, num_lags: int) -> np.ndarray:
-    lags = []
-    for i in range(1, num_lags + 1):
-        rolled = np.roll(data, shift=i, axis=0)
-        rolled[:i] = 0.0
-        lags.append(rolled)
-    return np.concatenate(lags, axis=1).astype(np.float32)
+    # z-score each column with training-period statistics
+    fit = arr[:fit_end][available[:fit_end]]
+    mu = np.nanmean(fit, axis=0)
+    sd = np.nanstd(fit, axis=0)
+    sd[sd < 1e-6] = 1.0
+    arr = (arr - mu) / sd
+    arr = np.nan_to_num(arr, nan=0.0)
+    arr = np.concatenate([arr, available[:, None].astype(np.float64)], axis=1)
+    names = [*names, "weather_available"]
+    return arr.astype(np.float32), names
 
 
-class TrafficDataset(Dataset):
-    """Windowed traffic dataset with optional time/holiday/weather/lag features.
+# =============================================================================
+# Batching
+# =============================================================================
 
-    Returns ``(features_dict, target_tensor)`` per sample. Keys present in
-    ``features_dict`` depend on the config flags. A ``concatenated`` key is
-    always provided for backward-compatible tensor consumers.
+class WindowBatcher:
+    """Yields batches of windows gathered on-device.
+
+    Each batch is a dict:
+      ``x``   (B, in, N, 1 + L)  z-scored traffic (+ L history-lag channels)
+      ``tod`` (B, in)            time-of-day slot (long)
+      ``dow`` (B, in)            day type (long; 7 = holiday if enabled)
+      ``exo`` (B, in, E)         exogenous features (only if present)
+      ``y``   (B, out, N)        raw targets (zeros = missing)
+
+    ``history_lags`` (e.g. ``(288, 2016)`` = one day / one week at 5-min
+    resolution) add, for input token ``i``, the observation ``lag`` steps
+    before the *target* step ``i`` - i.e. what happened at the same time of
+    the forecast period yesterday / last week. Only past data is used
+    (lag >= in_steps + out_steps), so there is no leakage.
     """
 
     def __init__(
         self,
-        data: np.ndarray,
-        timestamps: pd.DatetimeIndex | None = None,
-        config: TrainingConfig | None = None,
-        weather: WeatherIntegration | None = None,
+        tensors: dict[str, torch.Tensor],
+        starts: np.ndarray,
+        in_steps: int,
+        out_steps: int,
+        batch_size: int,
+        shuffle: bool = False,
+        drop_last: bool = False,
+        seed: int = 0,
+        history_lags: Sequence[int] = (),
     ) -> None:
-        if config is None:
-            config = TrainingConfig(base_output_dir="./output")
-
-        self.config = config
-        self.data = data.astype(np.float32, copy=False)
-        self.timestamps = timestamps
-        self.seq_length = config.seq_length
-        self.pred_length = config.pred_length
-
-        self.feature_groups: dict[str, np.ndarray] = {"traffic": self.data}
-
-        if config.use_time_features and timestamps is not None:
-            self.feature_groups["time"] = _create_time_features(timestamps)
-
-        if config.use_holiday_feature and timestamps is not None:
-            self.feature_groups["holiday"] = _create_holiday_feature(
-                timestamps, config.holiday_country_code,
-            )
-
-        if config.use_weather_feature and timestamps is not None:
-            if weather is None and config.weather_data_file:
-                weather = WeatherIntegration(config.weather_data_file)
-            if weather is not None:
-                try:
-                    self.feature_groups["weather"] = weather.align_to_timestamps(
-                        timestamps, feature_name=config.weather_feature_type,
-                    ).astype(np.float32)
-                except Exception as exc:
-                    logger.warning("Failed to attach weather features: %s", exc)
-
-        if config.use_lagged_features:
-            self.feature_groups["lagged"] = _create_lagged_features(self.data, config.num_lags)
-
-        self.feature_dims = {name: arr.shape[-1] for name, arr in self.feature_groups.items()}
-        self._concatenated = np.concatenate(list(self.feature_groups.values()), axis=1).astype(np.float32)
-        self.feature_dims["concatenated"] = self._concatenated.shape[1]
+        self.t = tensors
+        self.device = tensors["x"].device
+        self.starts = torch.as_tensor(starts, dtype=torch.long, device=self.device)
+        self.in_steps = in_steps
+        self.out_steps = out_steps
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.drop_last = drop_last
+        self.generator = torch.Generator(device="cpu")
+        self.generator.manual_seed(seed)
+        self._in_off = torch.arange(in_steps, device=self.device)
+        self._out_off = torch.arange(in_steps, in_steps + out_steps, device=self.device)
+        self.history_lags = tuple(int(lag) for lag in history_lags)
+        if self.history_lags:
+            if in_steps != out_steps:
+                raise ValueError("history lags are aligned to target steps; need in_steps == out_steps")
+            if min(self.history_lags) < in_steps + out_steps:
+                raise ValueError("history lags must be >= in_steps + out_steps to use past data only")
+        self._lag_offs = [self._out_off - lag for lag in self.history_lags]
 
     def __len__(self) -> int:
-        return len(self.data) - self.seq_length - self.pred_length + 1
-
-    def __getitem__(self, idx: int) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
-        end = idx + self.seq_length
-        target_end = end + self.pred_length
-
-        features: dict[str, torch.Tensor] = {
-            name: torch.from_numpy(arr[idx:end]) for name, arr in self.feature_groups.items()
-        }
-        features["concatenated"] = torch.from_numpy(self._concatenated[idx:end])
-        target = torch.from_numpy(self.data[end:target_end])
-        return features, target
+        n = len(self.starts)
+        return n // self.batch_size if self.drop_last else -(-n // self.batch_size)
 
     @property
-    def total_feature_dim(self) -> int:
-        return self.feature_dims["concatenated"]
+    def num_samples(self) -> int:
+        return len(self.starts)
+
+    def __iter__(self) -> Iterator[dict[str, torch.Tensor]]:
+        n = len(self.starts)
+        if self.shuffle:
+            order = torch.randperm(n, generator=self.generator).to(self.device)
+        else:
+            order = torch.arange(n, device=self.device)
+        for b in range(len(self)):
+            idx = order[b * self.batch_size:(b + 1) * self.batch_size]
+            s = self.starts[idx]
+            xi = s[:, None] + self._in_off          # (B, in)
+            yi = s[:, None] + self._out_off         # (B, out)
+            x = self.t["x"][xi]                     # (B, in, N, 1)
+            if self._lag_offs:
+                lags = [self.t["x"][s[:, None] + off] for off in self._lag_offs]
+                x = torch.cat([x, *lags], dim=-1)   # (B, in, N, 1 + L)
+            batch = {
+                "x": x,
+                "tod": self.t["tod"][xi],
+                "dow": self.t["dow"][xi],
+                "y": self.t["y"][yi],               # (B, out, N)
+            }
+            if "exo" in self.t:
+                batch["exo"] = self.t["exo"][xi]
+            yield batch
+
+
+# =============================================================================
+# Bundle
+# =============================================================================
+
+@dataclass
+class STDataBundle:
+    train: WindowBatcher
+    val: WindowBatcher
+    test: WindowBatcher
+    scaler: ZScoreScaler
+    num_nodes: int
+    steps_per_day: int
+    num_day_types: int
+    adj: np.ndarray | None
+    exo_dim: int
+    input_dim: int = 1
+    exo_names: list[str] = field(default_factory=list)
+    timestamps: pd.DatetimeIndex | None = None
+    sensor_ids: list[str] = field(default_factory=list)
+    splits: dict[str, np.ndarray] = field(default_factory=dict)
+    info: dict[str, object] = field(default_factory=dict)
+
+
+def load_st_benchmark(
+    input_dir: str,
+    dataset_name: str,
+    batch_size: int = 16,
+    in_steps: int = 12,
+    out_steps: int = 12,
+    steps_per_day: int | None = None,
+    use_weather: bool = False,
+    weather_file: str | None = None,
+    use_holidays: bool = False,
+    holiday_country: str | None = None,
+    device: str = "cpu",
+    seed: int = 42,
+    eval_batch_size: int | None = None,
+    split_ratios: Sequence[float] = (0.7, 0.1, 0.2),
+    history_lags: Sequence[int] = (),
+) -> STDataBundle:
+    """Load a dataset under the benchmark protocol and build batchers.
+
+    With ``history_lags`` the earliest training windows (those without a full
+    lag history) are dropped; validation and test windows are unchanged, so
+    test metrics stay comparable with the literature.
+    """
+    df = load_traffic_frame(input_dir, dataset_name)
+    values = df.to_numpy(dtype=np.float32)            # (T, N) raw, zeros kept
+    timestamps = pd.DatetimeIndex(df.index)
+    T, N = values.shape
+
+    if steps_per_day is None:
+        step = pd.Series(timestamps).diff().dropna().mode().iloc[0]
+        steps_per_day = int(pd.Timedelta("1D") / step)
+
+    meta = DATASET_META.get(dataset_name, {})
+    country = (holiday_country or meta.get("country")) if use_holidays else None
+    if use_holidays and not country:
+        warnings.warn(f"no holiday country known for {dataset_name}; pass --holiday-country",
+                      stacklevel=2)
+    tod, dow, hol = calendar_indices(timestamps, steps_per_day, country)
+    num_day_types = 7
+    if use_holidays:
+        dow = np.where(hol > 0, 7, dow)
+        num_day_types = 8
+
+    splits = dcrnn_window_splits(T, in_steps, out_steps, split_ratios)
+    fit_end = int(splits["train"][-1]) + in_steps     # raw steps seen as train inputs
+    train_vals = values[:fit_end]
+    scaler = ZScoreScaler(train_vals.mean(), train_vals.std())
+
+    x = scaler.transform(values)[..., None].astype(np.float32)   # (T, N, 1)
+
+    tensors = {
+        "x": torch.from_numpy(x),
+        "tod": torch.from_numpy(tod),
+        "dow": torch.from_numpy(dow),
+        "y": torch.from_numpy(values),
+    }
+
+    exo_names: list[str] = []
+    if use_weather:
+        # Known datasets carry their timezones; for any other dataset the weather
+        # file is assumed to be in the same local time as the traffic data (which
+        # is what `visu-predict weather` produces), so no conversion is applied.
+        wf = weather_file or meta.get("weather_file") or f"weather_{dataset_name}_era5_local.csv"
+        wpath = wf if os.path.isabs(wf) else os.path.join(input_dir, wf)
+        traffic_tz, wtz = meta.get("traffic_tz"), meta.get("weather_tz")
+        if not os.path.exists(wpath):
+            # fall back to the original export (UTC stamps, partial coverage)
+            legacy = meta.get("weather_file_legacy")
+            if legacy and os.path.exists(os.path.join(input_dir, legacy)):
+                warnings.warn(f"{wf} not found; falling back to {legacy}, which is stamped in "
+                              "UTC and does not cover the whole period", stacklevel=2)
+                wpath, wtz = os.path.join(input_dir, legacy), meta.get("legacy_weather_tz", "UTC")
+        if os.path.exists(wpath):
+            exo, exo_names = load_weather_features(
+                wpath, timestamps, fit_end, traffic_tz=traffic_tz, weather_tz=wtz,
+            )
+            tensors["exo"] = torch.from_numpy(exo)
+            cover = float(exo[:, -1].mean())
+            test_cover = float(exo[splits["test"][0]:, -1].mean())
+            print(f"Weather: {len(exo_names)} features, coverage {cover:.1%} "
+                  f"(test period {test_cover:.1%})")
+        else:
+            warnings.warn(f"weather file not found ({wpath}); continuing without weather. "
+                          "Build it with `visu-predict weather`.", stacklevel=2)
+
+    tensors = {k: v.to(device) for k, v in tensors.items()}
+
+    adj = None
+    sensor_ids = [str(c) for c in df.columns]
+    adj_path = find_adjacency_file(input_dir, dataset_name)
+    if adj_path is not None:
+        try:
+            a, adj_ids = load_adjacency(adj_path)
+        except Exception as e:  # the adjacency is only needed for --graph-bias
+            warnings.warn(f"could not read {adj_path} ({e}); continuing without adjacency", stacklevel=2)
+        else:
+            if a.shape != (N, N):
+                warnings.warn(f"adjacency at {adj_path} has shape {a.shape}, expected {(N, N)}; ignored",
+                              stacklevel=2)
+            else:
+                positional = [str(i) for i in range(N)]
+                # compare only when both files name their sensors (the public PEMS-BAY
+                # CSV has positional column names, so there is nothing to check)
+                if positional not in (adj_ids, sensor_ids) and adj_ids != sensor_ids:
+                    warnings.warn(f"sensor ids in {adj_path} do not match the CSV columns "
+                                  "(the adjacency must use the same sensor order)", stacklevel=2)
+                adj = a.astype(np.float32)
+
+    history_lags = tuple(int(lag) for lag in history_lags)
+    batch_splits = dict(splits)
+    if history_lags:
+        min_start = max(history_lags) - in_steps
+        batch_splits = {k: v[v >= min_start] for k, v in splits.items()}
+        if len(batch_splits["val"]) != len(splits["val"]) or len(batch_splits["test"]) != len(splits["test"]):
+            raise ValueError("history lags longer than the training period would drop val/test windows")
+
+    ebs = eval_batch_size or max(batch_size, 64)
+
+    # training drops the ragged last batch (PEMS-BAY: a single sample), which
+    # also keeps shapes static for torch.compile
+    def make(name: str, bs: int, shuffle: bool) -> WindowBatcher:
+        return WindowBatcher(tensors, batch_splits[name], in_steps, out_steps, bs, shuffle=shuffle,
+                             drop_last=shuffle, seed=seed, history_lags=history_lags)
+
+    return STDataBundle(
+        train=make("train", batch_size, True),
+        val=make("val", ebs, False),
+        test=make("test", ebs, False),
+        scaler=scaler,
+        num_nodes=N,
+        steps_per_day=steps_per_day,
+        num_day_types=num_day_types,
+        adj=adj,
+        exo_dim=int(tensors["exo"].shape[-1]) if "exo" in tensors else 0,
+        input_dim=1 + len(history_lags),
+        exo_names=exo_names,
+        timestamps=timestamps,
+        sensor_ids=sensor_ids,
+        splits=batch_splits,
+        info={
+            "dataset": dataset_name, "timesteps": T, "nodes": N,
+            "zero_fraction": float((values == 0).mean()),
+            "train_windows": len(batch_splits["train"]), "val_windows": len(batch_splits["val"]),
+            "test_windows": len(batch_splits["test"]),
+            "test_start": str(timestamps[splits["test"][0] + in_steps]),
+            "history_lags": list(history_lags),
+            "scaler": scaler.state_dict(),
+        },
+    )
