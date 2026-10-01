@@ -1,6 +1,7 @@
-"""Entry point for ``python -m visu_predict``."""
+"""``python -m visu_predict`` - same as the ``visu-predict`` command."""
 
-from visu_predict.cli import main
+import sys
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+from .cli import main
+
+sys.exit(main())

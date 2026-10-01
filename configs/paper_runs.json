@@ -1,0 +1,19 @@
+[
+ {"name": "METR-LA_st_base",       "args": "--dataset METR-LA --seed 42 --precision bf16 --compile"},
+ {"name": "METR-LA_st_base_s43",   "args": "--dataset METR-LA --seed 43 --precision bf16 --compile"},
+ {"name": "METR-LA_st_base_s44",   "args": "--dataset METR-LA --seed 44 --precision bf16 --compile"},
+ {"name": "METR-LA_st_hist",       "args": "--dataset METR-LA --history-lags 288 2016 --seed 42 --precision bf16 --compile"},
+ {"name": "METR-LA_st_hist_s43",   "args": "--dataset METR-LA --history-lags 288 2016 --seed 43 --precision bf16 --compile"},
+ {"name": "METR-LA_st_hist_s44",   "args": "--dataset METR-LA --history-lags 288 2016 --seed 44 --precision bf16 --compile"},
+ {"name": "PEMS-BAY_st_base",      "args": "--dataset PEMS-BAY --seed 42 --precision bf16 --compile"},
+ {"name": "PEMS-BAY_st_base_s43",  "args": "--dataset PEMS-BAY --seed 43 --precision bf16 --compile"},
+ {"name": "PEMS-BAY_st_base_s44",  "args": "--dataset PEMS-BAY --seed 44 --precision bf16 --compile"},
+ {"name": "PEMS-BAY_st_hist",      "args": "--dataset PEMS-BAY --history-lags 288 2016 --seed 42 --precision bf16 --compile"},
+ {"name": "PEMS-BAY_st_hist_s43",  "args": "--dataset PEMS-BAY --history-lags 288 2016 --seed 43 --precision bf16 --compile"},
+ {"name": "PEMS-BAY_st_hist_s44",  "args": "--dataset PEMS-BAY --history-lags 288 2016 --seed 44 --precision bf16 --compile"},
+ {"name": "METR-LA_st_graph",      "args": "--dataset METR-LA --graph-bias --precision bf16 --compile"},
+ {"name": "PEMS-BAY_st_graph",     "args": "--dataset PEMS-BAY --graph-bias --precision bf16 --compile"},
+ {"name": "METR-LA_st_weather",    "args": "--dataset METR-LA --weather --precision bf16 --compile"},
+ {"name": "PEMS-BAY_st_weather",   "args": "--dataset PEMS-BAY --weather --precision bf16 --compile"},
+ {"name": "METR-LA_legacy",        "args": "--dataset METR-LA --model legacy --batch-size 32 --precision tf32"}
+]
