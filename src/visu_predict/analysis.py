@@ -53,8 +53,17 @@ def _config_key(result: dict, fallback: str) -> str:
     return json.dumps({k: v for k, v in sorted(args.items()) if k not in EXECUTION_ARGS}, default=str)
 
 
+def _common_prefix(names: list[str]) -> str:
+    """Longest common leading run of characters (run names, not paths)."""
+    first, last = min(names), max(names)
+    n = 0
+    while n < len(first) and first[n] == last[n]:
+        n += 1
+    return first[:n]
+
+
 def _group_label(names: list[str]) -> str:
-    prefix = os.path.commonprefix(names) if len(names) > 1 else names[0]
+    prefix = _common_prefix(names) if len(names) > 1 else names[0]
     return re.sub(r"(_s\d*)?_*$", "", prefix) or names[0]
 
 
